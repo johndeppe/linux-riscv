@@ -2,8 +2,8 @@
 VERSION = 6
 PATCHLEVEL = 1
 SUBLEVEL = 80
-EXTRAVERSION =
-NAME = Curry Ramen
+EXTRAVERSION = HWShootdown
+NAME = Spicy Curry Ramen
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"

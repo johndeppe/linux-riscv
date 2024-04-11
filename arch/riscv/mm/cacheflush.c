@@ -79,6 +79,16 @@ void flush_icache_mm(struct mm_struct *mm, bool local)
 #endif /* CONFIG_SMP */
 
 #ifdef CONFIG_MMU
+static u32 xuantie_flush_icache_range_flag = 0;
+static inline void __flush_icache_range(unsigned long start, unsigned long end)
+{
+	register unsigned long i asm("a0") = start & ~(L1_CACHE_BYTES - 1);
+
+	for (; i < end; i += L1_CACHE_BYTES)
+		asm volatile (".long 0x0305000b"); /* icache.iva a0 */
+
+	asm volatile (".long 0x01b0000b"); /* sync_is */
+}
 void flush_icache_pte(pte_t pte)
 {
 	struct page *page = pte_page(pte);
@@ -91,7 +101,15 @@ void flush_icache_pte(pte_t pte)
 		page = compound_head(page);
 
 	if (!test_bit(PG_dcache_clean, &page->flags)) {
-		flush_icache_all();
+		if (xuantie_flush_icache_range_flag) {
+			unsigned long start = (unsigned long)page_address(page);
+			unsigned long end = start + page_size(page);
+
+			/* remove flush_icache_all for performance */
+			__flush_icache_range(start, end);
+		}
+		else
+			flush_icache_all();
 		set_bit(PG_dcache_clean, &page->flags);
 	}
 }
@@ -133,3 +151,15 @@ void riscv_init_cbom_blocksize(void)
 	if (probed_block_size)
 		riscv_cbom_block_size = probed_block_size;
 }
+
+static int __init xuantie_flush_icache_init(void)
+{
+	struct device_node *cpu = of_find_node_by_path("/cpus");
+	if (cpu) {
+		of_property_read_u32(cpu, "flush-icache-range", &xuantie_flush_icache_range_flag);
+		of_node_put(cpu);
+	}
+
+	return 0;
+}
+arch_initcall(xuantie_flush_icache_init);
