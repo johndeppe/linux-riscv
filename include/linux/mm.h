@@ -405,6 +405,13 @@ extern unsigned int kobjsize(const void *objp);
 #define VM_ALLOW_ANY_UNCACHED		VM_NONE
 #endif
 
+/*
+ * VM_PRIVATE_TLB
+ * TODO: Wrap in arch config options
+ */
+#define VM_PRIVATE_TLB_BIT	40	/* bit only usable on 64-bit architectures */
+#define VM_PRIVATE_TLB		BIT(VM_PRIVATE_TLB)
+
 /* Bits set in the VMA until the stack is in its final location */
 #define VM_STACK_INCOMPLETE_SETUP (VM_RAND_READ | VM_SEQ_READ | VM_STACK_EARLY)
 

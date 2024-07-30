@@ -79,6 +79,8 @@
 
 #define MADV_COLLAPSE	25		/* Synchronous hugepage collapse */
 
+#define MADV_PRIVATE_TLB	26	/* likely hart-private, try to reduce shootdowns */
+
 /* compatibility flags */
 #define MAP_FILE	0
 

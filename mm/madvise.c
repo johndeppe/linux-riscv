@@ -60,11 +60,19 @@ static int madvise_need_mmap_write(int behavior)
 	case MADV_POPULATE_READ:
 	case MADV_POPULATE_WRITE:
 	case MADV_COLLAPSE:
+	case MADV_PRIVATE_TLB:
 		return 0;
 	default:
 		/* be safe, default to 1. list exceptions explicitly */
 		return 1;
 	}
+}
+
+static long madvise_private_tlb(struct vm_area_struct *vma,
+			struct vm_area_struct **prev,
+			unsigned long start_addr, unsigned long end_addr)
+{
+	return -1; // FIXME
 }
 
 #ifdef CONFIG_ANON_VMA_NAME
@@ -1085,6 +1093,8 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 		break;
 	case MADV_COLLAPSE:
 		return madvise_collapse(vma, prev, start, end);
+	 case MADV_PRIVATE_TLB:
+		return madvise_private_tlb(vma, prev, start, end);
 	}
 
 	anon_name = anon_vma_name(vma);
@@ -1188,6 +1198,7 @@ madvise_behavior_valid(int behavior)
 	case MADV_SOFT_OFFLINE:
 	case MADV_HWPOISON:
 #endif
+	case MADV_PRIVATE_TLB:
 		return true;
 
 	default:
