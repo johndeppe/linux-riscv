@@ -219,7 +219,7 @@ static inline bool access_error(unsigned long cause, struct vm_area_struct *vma)
  * This routine handles page faults.  It determines the address and the
  * problem, and then passes it off to one of the appropriate routines.
  */
-void handle_page_fault(struct pt_regs *regs)
+void handle_page_fault(struct pt_regs *regs) // PRIVATE_TLB
 {
 	struct task_struct *tsk;
 	struct vm_area_struct *vma;

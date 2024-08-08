@@ -5345,7 +5345,7 @@ unlock:
  * the result, the mmap_lock is not held on exit.  See filemap_fault()
  * and __folio_lock_or_retry().
  */
-static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
+static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma, // PRIVATE_TLB
 		unsigned long address, unsigned int flags)
 {
 	struct vm_fault vmf = {
@@ -5569,7 +5569,7 @@ static vm_fault_t sanitize_fault_flags(struct vm_area_struct *vma,
  * The mmap_lock may have been released depending on flags and our
  * return value.  See filemap_fault() and __folio_lock_or_retry().
  */
-vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
+vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address, // PRIVATE_TLB
 			   unsigned int flags, struct pt_regs *regs)
 {
 	/* If the fault handler drops the mmap_lock, vma may be freed */

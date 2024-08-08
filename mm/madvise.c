@@ -72,7 +72,12 @@ static long madvise_private_tlb(struct vm_area_struct *vma,
 			struct vm_area_struct **prev,
 			unsigned long start_addr, unsigned long end_addr)
 {
-	return -1; // FIXME
+	printk(KERN_INFO "smokewagon: madvise_private_tlb. start_addr: %lu, end_addr: %lu\n", start_addr, end_addr);
+	// TODO set vma flag
+	// TODO start tracking PTEs TLB residence
+		// TODO invalidate existing PTEs to foil hardware page walker
+		// TODO flush TLBs (don't delay) of existing PTEs to start getting faults
+	return 0; // TODO return error
 }
 
 #ifdef CONFIG_ANON_VMA_NAME
@@ -1094,7 +1099,7 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 	case MADV_COLLAPSE:
 		return madvise_collapse(vma, prev, start, end);
 	 case MADV_PRIVATE_TLB:
-		return madvise_private_tlb(vma, prev, start, end);
+		return madvise_private_tlb(vma, prev, start, end); // FIXME, what is a page fault happens before vm_flags is set below?
 	}
 
 	anon_name = anon_vma_name(vma);
