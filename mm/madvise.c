@@ -60,7 +60,9 @@ static int madvise_need_mmap_write(int behavior)
 	case MADV_POPULATE_READ:
 	case MADV_POPULATE_WRITE:
 	case MADV_COLLAPSE:
+		return 0;
 	case MADV_PRIVATE_TLB:
+		printk(KERN_ALERT "smokewagon: madvise_need_mmap_write. behavior: %d\n", behavior);
 		return 0;
 	default:
 		/* be safe, default to 1. list exceptions explicitly */
@@ -72,7 +74,7 @@ static long madvise_private_tlb(struct vm_area_struct *vma,
 			struct vm_area_struct **prev,
 			unsigned long start_addr, unsigned long end_addr)
 {
-	printk(KERN_INFO "smokewagon: madvise_private_tlb. start_addr: %lu, end_addr: %lu\n", start_addr, end_addr);
+	printk(KERN_ALERT "smokewagon: madvise_private_tlb. start_addr: %lu, end_addr: %lu\n", start_addr, end_addr);
 	// TODO set vma flag
 	// TODO start tracking PTEs TLB residence
 		// TODO invalidate existing PTEs to foil hardware page walker
@@ -1099,7 +1101,8 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 	case MADV_COLLAPSE:
 		return madvise_collapse(vma, prev, start, end);
 	 case MADV_PRIVATE_TLB:
-		return madvise_private_tlb(vma, prev, start, end); // FIXME, what is a page fault happens before vm_flags is set below?
+		printk(KERN_ALERT "smokewagon: madvise_vma_behavior. vma: %p, prev: %p, start: %lu, end: %lu, behavior: %lu\n", vma, prev, start, end, behavior);
+		return madvise_private_tlb(vma, prev, start, end); // FIXME, what if a page fault happens before vm_flags is set below?
 	}
 
 	anon_name = anon_vma_name(vma);
@@ -1418,13 +1421,19 @@ int do_madvise(struct mm_struct *mm, unsigned long start, size_t len_in, int beh
 	int write;
 	size_t len;
 	struct blk_plug plug;
+	if (behavior == 26)
+		printk(KERN_ALERT "smokewagon: do_madvise. mm: %p, start: %lu, len_in: %zu\n", mm, start, len_in);
 
 	if (!madvise_behavior_valid(behavior))
 		return -EINVAL;
+	if (behavior == 26)
+		printk(KERN_ALERT "smokewagon: behavior validated. mm: %p, start: %lu, len_in: %zu\n", mm, start, len_in);
 
 	if (!PAGE_ALIGNED(start))
 		return -EINVAL;
 	len = PAGE_ALIGN(len_in);
+	if (behavior == 26)
+		printk(KERN_ALERT "smokewagon: page aligned. mm: %p, start: %lu, len_in: %zu\n", mm, start, len_in);
 
 	/* Check to see whether len was rounded up from small -ve to zero */
 	if (len_in && !len)
