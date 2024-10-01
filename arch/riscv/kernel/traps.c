@@ -355,7 +355,7 @@ void do_trap_ecall_u(struct pt_regs *regs)
 }
 
 #ifdef CONFIG_MMU
-asmlinkage __visible noinstr void do_page_fault(struct pt_regs *regs) // PRIVATE_TLB
+asmlinkage __visible noinstr void do_page_fault(struct pt_regs *regs) // smokewagon
 {
 	irqentry_state_t state = irqentry_enter(regs);
 

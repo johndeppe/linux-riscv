@@ -802,7 +802,7 @@ extern pmd_t pmdp_collapse_flush(struct vm_area_struct *vma,
  * Format of swap PTE:
  *	bit            0:	_PAGE_PRESENT (zero)
  *	bit       1 to 3:       _PAGE_LEAF (zero)
- *	bit            5:	_PAGE_PROT_NONE (zero) // PRIVATE_TLB
+ *	bit            5:	_PAGE_PROT_NONE (zero) // smokewagon?
  *	bit            6:	exclusive marker
  *	bits      7 to 11:	swap type
  *	bits 12 to XLEN-1:	swap offset

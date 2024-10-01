@@ -21,7 +21,12 @@
 #define _PAGE_SPECIAL   (1 << 8)    /* RSW: 0x1 */
 #define _PAGE_TABLE     _PAGE_PRESENT
 
-#define _PAGE_PRIVATE_TLB   (1 << 9) /* Set by software to monitor page's TLB-residence */
+#define _PAGE_PRIVATE_TLB   (1 << 9) /* Set by smokewagon software to monitor page's TLB-residence */
+/*
+ * SOMETHING is set on PRIVATE_TLB-monitored pages, there's
+ * SWAP ptes and REGULAR PTEs, when is _PAGE_SPECIAL set?
+ */
+
 
 /*
  * _PAGE_PROT_NONE is set on not-present pages (and ignored by the hardware) to

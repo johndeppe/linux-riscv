@@ -60,9 +60,8 @@ static int madvise_need_mmap_write(int behavior)
 	case MADV_POPULATE_READ:
 	case MADV_POPULATE_WRITE:
 	case MADV_COLLAPSE:
-		return 0;
 	case MADV_PRIVATE_TLB:
-		printk(KERN_ALERT "smokewagon: madvise_need_mmap_write. behavior: %d\n", behavior);
+	case MADV_NORMAL_TLB:
 		return 0;
 	default:
 		/* be safe, default to 1. list exceptions explicitly */
@@ -75,11 +74,23 @@ static long madvise_private_tlb(struct vm_area_struct *vma,
 			unsigned long start_addr, unsigned long end_addr)
 {
 	printk(KERN_ALERT "smokewagon: madvise_private_tlb. start_addr: %lu, end_addr: %lu\n", start_addr, end_addr);
-	// TODO set vma flag
+	vm_flags_set(vma, VM_PRIVATE_TLB);
 	// TODO start tracking PTEs TLB residence
 		// TODO invalidate existing PTEs to foil hardware page walker
 		// TODO flush TLBs (don't delay) of existing PTEs to start getting faults
-	return 0; // TODO return error
+	return 0; // TODO return errors as appropriate
+}
+
+static long madvise_normal_tlb(struct vm_area_struct *vma,
+			struct vm_area_struct **prev,
+			unsigned long start_addr, unsigned long end_addr)
+{
+	printk(KERN_ALERT "smokewagon: madvise_normal_tlb. start_addr: %lu, end_addr: %lu\n", start_addr, end_addr);
+	vm_flags_clear(vma, VM_PRIVATE_TLB);
+	// TODO stop tracking PTEs TLB residence
+		// make valid PTEs to resume hardware page walker
+	// don't think I need to flush TLB, as PTEs should match any that are loaded?
+	return 0; // TODO return errors as appropriate
 }
 
 #ifdef CONFIG_ANON_VMA_NAME
@@ -1100,9 +1111,12 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 		break;
 	case MADV_COLLAPSE:
 		return madvise_collapse(vma, prev, start, end);
-	 case MADV_PRIVATE_TLB:
+	case MADV_PRIVATE_TLB:
 		printk(KERN_ALERT "smokewagon: madvise_vma_behavior. vma: %p, prev: %p, start: %lu, end: %lu, behavior: %lu\n", vma, prev, start, end, behavior);
 		return madvise_private_tlb(vma, prev, start, end); // FIXME, what if a page fault happens before vm_flags is set below?
+	case MADV_NORMAL_TLB:
+		printk(KERN_ALERT "smokewagon: madvise_vma_behavior. vma: %p, prev: %p, start: %lu, end: %lu, behavior: %lu\n", vma, prev, start, end, behavior);
+		return madvise_normal_tlb(vma, prev, start, end);
 	}
 
 	anon_name = anon_vma_name(vma);
@@ -1207,6 +1221,7 @@ madvise_behavior_valid(int behavior)
 	case MADV_HWPOISON:
 #endif
 	case MADV_PRIVATE_TLB:
+	case MADV_NORMAL_TLB:
 		return true;
 
 	default:
