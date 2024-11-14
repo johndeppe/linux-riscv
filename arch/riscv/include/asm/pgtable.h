@@ -800,15 +800,18 @@ extern pmd_t pmdp_collapse_flush(struct vm_area_struct *vma,
  * are !pte_none() && !pte_present().
  *
  * Format of swap PTE:
- *	bit            0:	_PAGE_PRESENT (zero)
- *	bit       1 to 3:   _PAGE_LEAF (zero) (non-swap RWX)
- *	bit            5:	_PAGE_PROT_NONE (zero)
- *	bit            6:	exclusive marker (non-swap _PAGE_ACCESSED)
- *	bit            7:	smokewagon Dirty (non-swap _PAGE_DIRTY)
-  *	bits     8 to 12:	swap type
- *	bits 15 to XLEN-1:	swap offset
+ *	bit             0:	_PAGE_PRESENT (zero)
+ *	bit        1 to 3:	_PAGE_LEAF (zero)
+ *	bit             5:	_PAGE_PROT_NONE (zero)
+ *	bit             6:	unused (when Smokewagon soft-loads TLB from this PTE, _PAGE_ACCESSED)
+ *	bit             7:	unused (when Smokewagon soft-loads TLB from this PTE, _PAGE_DIRTY)
+ *	bit             8:	unused (when Smokewagon soft-loads TLB from this PTE, _PAGE_SPECIAL)
+ *	bit             9:	exclusive marker
+ *	bit            10:	Smokewagon
+  *	bits     11 to 15:	swap type
+ *	bits 16 to XLEN-1:	swap offset
  */
-#define __SWP_TYPE_SHIFT	8
+#define __SWP_TYPE_SHIFT	11
 #define __SWP_TYPE_BITS		5
 #define __SWP_TYPE_MASK		((1UL << __SWP_TYPE_BITS) - 1)
 #define __SWP_OFFSET_SHIFT	(__SWP_TYPE_BITS + __SWP_TYPE_SHIFT)

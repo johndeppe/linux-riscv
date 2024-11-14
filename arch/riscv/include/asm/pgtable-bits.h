@@ -19,17 +19,15 @@
 #define _PAGE_SOFT      (3 << 8)    /* Reserved for software */
 
 #define _PAGE_SPECIAL   (1 << 8)    /* RSW: 0x1 */
+#define _PAGE_SWP_EXCLUSIVE (1 << 9) /* Used for swap PTEs only. */
+#define _PAGE_SMOKEWAGON (1 << 10)  /* Set for PTEs soft-loaded to TLB for tracking */
 #define _PAGE_TABLE     _PAGE_PRESENT
 
-#define _PAGE_PRIVATE_TLB   (1 << 9) /* Set by smokewagon software to monitor page's TLB-residence */
 /*
  * _PAGE_PROT_NONE is set on not-present pages (and ignored by the hardware) to
  * distinguish them from swapped out pages
  */
 #define _PAGE_PROT_NONE _PAGE_GLOBAL
-
-/* Used for swap PTEs only. */
-#define _PAGE_SWP_EXCLUSIVE _PAGE_ACCESSED
 
 #define _PAGE_PFN_SHIFT 10
 
