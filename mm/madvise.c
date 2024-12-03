@@ -69,17 +69,44 @@ static int madvise_need_mmap_write(int behavior)
 	}
 }
 
-/* enter with mmap_lock */
-static long madvise_private_tlb(struct vm_area_struct *vma,
+/*
+ * smokewagonify_pte- The pagewalk pte_entry callback
+ *
+ * Change a regular pte to a smokewagon pte.
+ */
+ static int smokewagonify_pte(pte_t *ptep, unsigned long addr, unsigned long end,
+		  struct mm_walk *walk)
+{
+	pte_t old_pte = ptep_get_and_clear(walk->mm, addr, ptep);
+	unsigned long pfn = pte_pfn(old_pte);
+	pte_t new_pte = swp_entry_to_pte(make_smokewagon_entry(pfn));
+	printk(KERN_ALERT "smokewagon: smokewagonify_pte. old_pte: %lx, new_pte: %lx, pfn: %lu\n", old_pte.pte, new_pte.pte, pfn);
+	set_pte_at(walk->mm, addr, ptep, new_pte);
+	// TODO micro-optimization: if page was in local TLB, re-add it to TLB
+	return 0;
+}
+
+static const struct mm_walk_ops smokewagonify_walk_ops = {
+	.pte_entry	= smokewagonify_pte,
+	.walk_lock	= PGWALK_WRLOCK,
+};
+
+/*
+ * Enter with mmap_lock from do_madvise.
+ * Smokewagonify: Set smokewagon VMA bit PTEs so page faults won't be confused.
+ * Desmokewagonify: TODO: think about this more. Clear VMA bit first or set PTEs first?
+ */
+static long madvise_smokewagon(struct vm_area_struct *vma,
 			struct vm_area_struct **prev,
 			unsigned long start_addr, unsigned long end_addr,
 			unsigned long behavior)
 {
-	printk(KERN_ALERT "smokewagon: madvise_private_tlb. behavior: %lu, start_addr: %lu, end_addr: %lu\n", behavior, start_addr, end_addr);
+	printk(KERN_ALERT "smokewagon: madvise_smokewagon. behavior: %lu, start_addr: 0x%lx, end_addr: 0x%lx\n", behavior, start_addr, end_addr);
 		switch (behavior) {
 		case MADV_PRIVATE_TLB:
-			//invalidate PTEs
-			//flush TLBs
+			int error = walk_page_range_vma(vma, start_addr, end_addr, &smokewagonify_walk_ops, 0);
+			printk(KERN_ALERT "smokewagon: madvise_smokewagon's flush_tlb_range().");
+			flush_tlb_range(vma, start_addr, end_addr);
 			break;
 		case MADV_NORMAL_TLB:
 			//revalidate PTEs
@@ -1113,23 +1140,19 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 	case MADV_PRIVATE_TLB:
 		new_flags |= VM_PRIVATE_TLB;
 		printk(KERN_ALERT "smokewagon: madvise_vma_behavior. behavior: %lu, vma: %p, prev: %p, start: %lu, end: %lu\n", behavior, vma, prev, start, end);
+		madvise_smokewagon(vma, prev, start, end, behavior);
 		break;
 	case MADV_NORMAL_TLB:
 		new_flags &= ~VM_PRIVATE_TLB;
-		madvise_private_tlb(vma, prev, start, end, behavior);
 		printk(KERN_ALERT "smokewagon: madvise_vma_behavior. behavior: %lu, vma: %p, prev: %p, start: %lu, end: %lu\n", behavior, vma, prev, start, end);
+		madvise_smokewagon(vma, prev, start, end, behavior);
 		break;
-	}
 
 	anon_name = anon_vma_name(vma);
 	anon_vma_name_get(anon_name);
 	error = madvise_update_vma(vma, prev, start, end, new_flags,
 				   anon_name);
 	anon_vma_name_put(anon_name);
-
-	if (behavior == MADV_PRIVATE_TLB) {
-		madvise_private_tlb(vma, prev, start, end, behavior);
-	default:
 	}
 
 out:

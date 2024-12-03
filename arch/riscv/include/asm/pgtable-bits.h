@@ -20,7 +20,6 @@
 
 #define _PAGE_SPECIAL   (1 << 8)    /* RSW: 0x1 */
 #define _PAGE_SWP_EXCLUSIVE (1 << 9) /* Used for swap PTEs only. */
-#define _PAGE_SMOKEWAGON (1 << 10)  /* Set for PTEs soft-loaded to TLB for tracking */
 #define _PAGE_TABLE     _PAGE_PRESENT
 
 /*

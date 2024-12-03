@@ -311,6 +311,12 @@
 #define CSR_SIEH		0x114
 #define CSR_SIPH		0x154
 
+/* T-Head Extended S-Mode MMU Registers*/
+#define CSR_SMIR		0x9c0
+#define CSR_SMEL		0x9c1
+#define CSR_SMEH		0x9c2
+#define CSR_SMCIR		0x9c3
+
 #define CSR_VSSTATUS		0x200
 #define CSR_VSIE		0x204
 #define CSR_VSTVEC		0x205

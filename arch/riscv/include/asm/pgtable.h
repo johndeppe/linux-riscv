@@ -807,11 +807,10 @@ extern pmd_t pmdp_collapse_flush(struct vm_area_struct *vma,
  *	bit             7:	unused (when Smokewagon soft-loads TLB from this PTE, _PAGE_DIRTY)
  *	bit             8:	unused (when Smokewagon soft-loads TLB from this PTE, _PAGE_SPECIAL)
  *	bit             9:	exclusive marker
- *	bit            10:	Smokewagon
-  *	bits     11 to 15:	swap type
- *	bits 16 to XLEN-1:	swap offset
+ *	bits     10 to 14:	swap type
+ *	bits 15 to XLEN-1:	swap offset
  */
-#define __SWP_TYPE_SHIFT	11
+#define __SWP_TYPE_SHIFT	10
 #define __SWP_TYPE_BITS		5
 #define __SWP_TYPE_MASK		((1UL << __SWP_TYPE_BITS) - 1)
 #define __SWP_OFFSET_SHIFT	(__SWP_TYPE_BITS + __SWP_TYPE_SHIFT)

@@ -164,6 +164,16 @@ static inline void *swp_to_radix_entry(swp_entry_t entry)
 	return xa_mk_value(entry.val);
 }
 
+static inline swp_entry_t make_smokewagon_entry(pgoff_t offset)
+{
+	return swp_entry(SWP_SMOKEWAGON, offset);
+}
+
+static inline int is_smokewagon_entry(swp_entry_t entry)
+{
+	return unlikely(swp_type(entry) == SWP_SMOKEWAGON);
+}
+
 #if IS_ENABLED(CONFIG_DEVICE_PRIVATE)
 static inline swp_entry_t make_readable_device_private_entry(pgoff_t offset)
 {
@@ -492,7 +502,7 @@ static inline bool is_pfn_swap_entry(swp_entry_t entry)
 	BUILD_BUG_ON(SWP_TYPE_SHIFT < SWP_PFN_BITS);
 
 	return is_migration_entry(entry) || is_device_private_entry(entry) ||
-	       is_device_exclusive_entry(entry);
+	       is_device_exclusive_entry(entry) || is_smokewagon_entry(entry);
 }
 
 struct page_vma_mapped_walk;

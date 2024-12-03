@@ -3944,7 +3944,12 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 
 	entry = pte_to_swp_entry(vmf->orig_pte);
 	if (unlikely(non_swap_entry(entry))) {
-		if (is_migration_entry(entry)) {
+		if (is_smokewagon_entry(entry)) {
+			unsigned long pfn = swp_offset_pfn(entry); // get PFN
+			printk(KERN_ALERT "smokewagon: do_swap_page(). vmf->orig_pte: 0x%lx, pfn: %lu\n", vmf->orig_pte.pte, pfn);
+			print_bad_pte(vma, vmf->address, vmf->orig_pte, NULL);
+			ret = VM_FAULT_SIGBUS;
+		} else if (is_migration_entry(entry)) {
 			migration_entry_wait(vma->vm_mm, vmf->pmd,
 					     vmf->address);
 		} else if (is_device_exclusive_entry(entry)) {
@@ -5295,7 +5300,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 	}
 
 	if (!vmf->pte)
-		return do_pte_missing(vmf);
+		return do_pte_missing(vmf); // TODO add smokewagon PTE when not already faulted-in
 
 	if (!pte_present(vmf->orig_pte))
 		return do_swap_page(vmf);
@@ -5345,7 +5350,7 @@ unlock:
  * the result, the mmap_lock is not held on exit.  See filemap_fault()
  * and __folio_lock_or_retry().
  */
-static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma, // smokewagon
+static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 		unsigned long address, unsigned int flags)
 {
 	struct vm_fault vmf = {
@@ -5569,7 +5574,7 @@ static vm_fault_t sanitize_fault_flags(struct vm_area_struct *vma,
  * The mmap_lock may have been released depending on flags and our
  * return value.  See filemap_fault() and __folio_lock_or_retry().
  */
-vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address, // smokewagon
+vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 			   unsigned int flags, struct pt_regs *regs)
 {
 	/* If the fault handler drops the mmap_lock, vma may be freed */
