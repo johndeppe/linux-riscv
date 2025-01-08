@@ -406,11 +406,12 @@ extern unsigned int kobjsize(const void *objp);
 #endif
 
 /*
- * VM_PRIVATE_TLB
+ * VM_SMOKEWAGON
+ * This flag activates per-page TLB residence tracking.
  * TODO: Wrap in arch config options
  */
-#define VM_PRIVATE_TLB_BIT	40	/* bit only usable on 64-bit architectures */
-#define VM_PRIVATE_TLB		BIT(VM_PRIVATE_TLB_BIT)
+#define VM_SMOKEWAGON_BIT	40	/* bit only usable on 64-bit architectures */
+#define VM_SMOKEWAGON		BIT(VM_SMOKEWAGON_BIT)
 
 /* Bits set in the VMA until the stack is in its final location */
 #define VM_STACK_INCOMPLETE_SETUP (VM_RAND_READ | VM_SEQ_READ | VM_STACK_EARLY)

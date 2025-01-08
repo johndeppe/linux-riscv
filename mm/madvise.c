@@ -74,7 +74,7 @@ static int madvise_need_mmap_write(int behavior)
  *
  * Change a regular pte to a smokewagon pte.
  */
- static int smokewagonify_pte(pte_t *ptep, unsigned long addr, unsigned long end,
+static int smokewagonify_pte(pte_t *ptep, unsigned long addr, unsigned long end,
 		  struct mm_walk *walk)
 {
 	pte_t old_pte = ptep_get_and_clear(walk->mm, addr, ptep);
@@ -1138,12 +1138,12 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 	case MADV_COLLAPSE:
 		return madvise_collapse(vma, prev, start, end);
 	case MADV_PRIVATE_TLB:
-		new_flags |= VM_PRIVATE_TLB;
+		new_flags |= VM_SMOKEWAGON;
 		printk(KERN_ALERT "smokewagon: madvise_vma_behavior. behavior: %lu, vma: %p, prev: %p, start: %lu, end: %lu\n", behavior, vma, prev, start, end);
 		madvise_smokewagon(vma, prev, start, end, behavior);
 		break;
 	case MADV_NORMAL_TLB:
-		new_flags &= ~VM_PRIVATE_TLB;
+		new_flags &= ~VM_SMOKEWAGON;
 		printk(KERN_ALERT "smokewagon: madvise_vma_behavior. behavior: %lu, vma: %p, prev: %p, start: %lu, end: %lu\n", behavior, vma, prev, start, end);
 		madvise_smokewagon(vma, prev, start, end, behavior);
 		break;

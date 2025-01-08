@@ -4482,8 +4482,12 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	folio_add_new_anon_rmap(folio, vma, addr);
 	folio_add_lru_vma(folio, vma);
 setpte:
-	if (uffd_wp)
+	if (uffd_wp) {
 		entry = pte_mkuffd_wp(entry);
+	} else if (vma->vm_flags & VM_SMOKEWAGON) {
+		printk(KERN_ALERT "smokewagon: do_anonymous_page(): pfn: %ld\n", pte_pfn(entry));
+		entry = swp_entry_to_pte(make_smokewagon_entry(pte_pfn(entry)));
+	}
 	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr_pages);
 
 	/* No need to invalidate - it was non-present before */
