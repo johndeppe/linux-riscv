@@ -827,6 +827,12 @@ extern pmd_t pmdp_collapse_flush(struct vm_area_struct *vma,
 #define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
 #define __swp_entry_to_pte(x)	((pte_t) { (x).val })
 
+static inline pte_t __make_smokewagon_pte(pte_t old_pte, swp_entry_t swp)
+{
+	swp.val |= pte_val(old_pte) & GENMASK(__SWP_TYPE_SHIFT - 1, 1); // propagate permissions, leave V bit clear
+	return __swp_entry_to_pte(swp);
+}
+
 static inline int pte_swp_exclusive(pte_t pte)
 {
 	return pte_val(pte) & _PAGE_SWP_EXCLUSIVE;

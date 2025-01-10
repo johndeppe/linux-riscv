@@ -163,10 +163,20 @@ static inline void *swp_to_radix_entry(swp_entry_t entry)
 {
 	return xa_mk_value(entry.val);
 }
-
+/*
+// TODO preserve accessed and dirty bits? should probably accept a pte_t instead of an offset
 static inline swp_entry_t make_smokewagon_entry(pgoff_t offset)
 {
 	return swp_entry(SWP_SMOKEWAGON, offset);
+}
+*/
+/*
+ * A smokewagon pte is a swap entry that has the pte's permissions in low bits before swaptype
+ */
+static inline pte_t make_smokewagon_pte(pte_t pte)
+{
+	swp_entry_t swp = __swp_entry(SWP_SMOKEWAGON, pte_pfn(pte));
+	return __make_smokewagon_pte(pte, swp);
 }
 
 static inline int is_smokewagon_entry(swp_entry_t entry)

@@ -78,11 +78,9 @@ static int smokewagonify_pte(pte_t *ptep, unsigned long addr, unsigned long end,
 		  struct mm_walk *walk)
 {
 	pte_t old_pte = ptep_get_and_clear(walk->mm, addr, ptep);
-	unsigned long pfn = pte_pfn(old_pte);
-	pte_t new_pte = swp_entry_to_pte(make_smokewagon_entry(pfn));
-	printk(KERN_ALERT "smokewagon: smokewagonify_pte. old_pte: %lx, new_pte: %lx, pfn: %lu\n", old_pte.pte, new_pte.pte, pfn);
+	pte_t new_pte = make_smokewagon_pte(old_pte);
+	printk(KERN_ALERT "smokewagon: smokewagonify_pte. old_pte: %lx, new_pte: %lx, pfn: %lu\n", old_pte.pte, new_pte.pte, pte_pfn(old_pte));
 	set_pte_at(walk->mm, addr, ptep, new_pte);
-	// TODO micro-optimization: if page was in local TLB, re-add it to TLB
 	return 0;
 }
 
@@ -109,7 +107,7 @@ static long madvise_smokewagon(struct vm_area_struct *vma,
 			flush_tlb_range(vma, start_addr, end_addr);
 			break;
 		case MADV_NORMAL_TLB:
-			//revalidate PTEs
+			// TODO revalidate PTEs
 			// don't need to flush TLBs?
 			break;
 		default:

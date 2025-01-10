@@ -3945,10 +3945,8 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 	entry = pte_to_swp_entry(vmf->orig_pte);
 	if (unlikely(non_swap_entry(entry))) {
 		if (is_smokewagon_entry(entry)) {
-			unsigned long pfn = swp_offset_pfn(entry); // get PFN
-			printk(KERN_ALERT "smokewagon: do_swap_page(). vmf->orig_pte: 0x%lx, pfn: %lu\n", vmf->orig_pte.pte, pfn);
-			print_bad_pte(vma, vmf->address, vmf->orig_pte, NULL);
-			ret = VM_FAULT_SIGBUS;
+			printk(KERN_ALERT "smokewagon: do_swap_page(). vmf->orig_pte: 0x%lx, pfn: %lx\n", vmf->orig_pte.pte, swp_offset_pfn(entry) );
+			smokewagon_load_tlb(vmf);
 		} else if (is_migration_entry(entry)) {
 			migration_entry_wait(vma->vm_mm, vmf->pmd,
 					     vmf->address);
@@ -4486,7 +4484,7 @@ setpte:
 		entry = pte_mkuffd_wp(entry);
 	} else if (vma->vm_flags & VM_SMOKEWAGON) {
 		printk(KERN_ALERT "smokewagon: do_anonymous_page(): pfn: %ld\n", pte_pfn(entry));
-		entry = swp_entry_to_pte(make_smokewagon_entry(pte_pfn(entry)));
+		entry = make_smokewagon_pte(entry);
 	}
 	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr_pages);
 

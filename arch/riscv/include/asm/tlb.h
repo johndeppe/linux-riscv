@@ -10,6 +10,8 @@ struct mmu_gather;
 
 static void tlb_flush(struct mmu_gather *tlb);
 
+inline void smokewagon_load_tlb(struct vm_fault *vmf);
+
 #ifdef CONFIG_MMU
 #include <linux/swap.h>
 

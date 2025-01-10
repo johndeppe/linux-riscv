@@ -236,3 +236,42 @@ void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch)
 			  FLUSH_TLB_MAX_SIZE, PAGE_SIZE);
 	cpumask_clear(&batch->cpumask);
 }
+
+/*
+ * These constants and the smokewagon_load_tlb() function below load a specific
+ * Smokewagon entry into the TLB  by twiddling CSRs.
+ *
+ * See page 52 of https://github.com/sophgo/sophgo-doc/blob/e416164a90ab761ab2a6815244e09a06a1c0113c/SG2042/T-Head/XuanTie-C910-C920-UserManual.pdf
+ */
+
+#define SMEH_VPN_SHIFT 19
+#define SMEH_4KB_PAGE 1UL << 16
+
+// SMEL has a Strongly Ordered bit at 63, but we want it to be 0.
+#define SMEL_CACHEABLE 1UL << 62
+#define SMEL_BUFFERABLE 1UL << 61
+#define SMEL_SHAREABLE 1UL << 60
+#define SMEL_TRUSTABLE 1UL << 59
+#define SMEL_PFN_SHIFT 10
+#define SMEL_VALID 1UL << 0
+
+#define SMCIR_TLBWR 1UL << 28
+
+inline void smokewagon_load_tlb(struct vm_fault *vmf)
+{
+	unsigned long vpn = vmf->address >> PAGE_SHIFT;
+	unsigned long asid = get_mm_asid(vmf->vma->vm_mm); // TODO: Does this need better locking?
+	unsigned long smeh = asid | SMEH_4KB_PAGE | (vpn << SMEH_VPN_SHIFT);
+	csr_write(CSR_SMEH, smeh);
+
+	unsigned long fixed = SMEL_CACHEABLE | SMEL_BUFFERABLE | SMEL_SHAREABLE | SMEL_TRUSTABLE | SMEL_VALID; // TODO check trustable by probing TLB and printing SMEH and SMEL at madvise time? 
+	unsigned long RWXUGADR = (GENMASK(9,1) & vmf->orig_pte.pte); // slightly worried about SMEL_VALID not matching the in-memory PTE but what can I do?
+	unsigned long pfn = swp_offset_pfn(__pte_to_swp_entry(vmf->orig_pte)) ;
+	unsigned long smel = fixed | (pfn << SMEL_PFN_SHIFT) | RWXUGADR;
+	csr_write(CSR_SMEL, smel);
+
+	unsigned long smcir = SMCIR_TLBWR; // might need ASID, or might only be needed for TLBIASID?
+
+	printk(KERN_ALERT "smokewagon_load_tlb(): asid: %ld , address: 0x%lx, vpn: 0x%lx pfn: 0x%lx\n", asid, vmf->address, vpn, pfn);
+	csr_write(CSR_SMCIR, smcir);
+}
