@@ -70,17 +70,21 @@ static int madvise_need_mmap_write(int behavior)
 }
 
 /*
- * smokewagonify_pte- The pagewalk pte_entry callback
+ * smokewagonify_pte - pagewalk pte_entry callback
  *
  * Change a regular pte to a smokewagon pte.
  */
 static int smokewagonify_pte(pte_t *ptep, unsigned long addr, unsigned long end,
 		  struct mm_walk *walk)
 {
-	pte_t old_pte = ptep_get_and_clear(walk->mm, addr, ptep);
-	pte_t new_pte = make_smokewagon_pte(old_pte);
-	printk(KERN_ALERT "smokewagon: smokewagonify_pte. old_pte: %lx, new_pte: %lx, pfn: %lu\n", old_pte.pte, new_pte.pte, pte_pfn(old_pte));
-	set_pte_at(walk->mm, addr, ptep, new_pte);
+	pte_t pte = ptep_get(ptep);
+	printk(KERN_ALERT "smokewagon: smokewagonify_pte(). pte: 0x%lx, pfn: 0x%lx\n", pte.pte, pte_pfn(pte));
+	pte_t new_pte;
+	if (pte.pte != 0) { // TODO think harder about what kinds of PTEs this can encounter: swap, not-faulted-in, others?
+		new_pte = make_smokewagon_pte(pte);
+		set_pte_at(walk->mm, addr, ptep, new_pte);
+		printk(KERN_ALERT "smokewagon: smokewagonify_pte(). new_pte: 0x%lx, pfn: 0x%lx\n", new_pte.pte, smokewagon_pfn(__pte_to_swp_entry(new_pte)));
+	}
 	return 0;
 }
 
@@ -192,9 +196,10 @@ static int madvise_update_vma(struct vm_area_struct *vma,
 	struct mm_struct *mm = vma->vm_mm;
 	int error;
 	VMA_ITERATOR(vmi, mm, start);
-
+	printk(KERN_ALERT "smokewagon: madvise_update_vma() A. vma: 0x%p, vma->vm_flags: 0x%lx, new_flags: 0x%lx\n", vma, vma->vm_flags, new_flags);
 	if (new_flags == vma->vm_flags && anon_vma_name_eq(anon_vma_name(vma), anon_name)) {
 		*prev = vma;
+		printk(KERN_ALERT "smokewagon: madvise_update_vma() B. vma: 0x%p, vma->vm_flags: 0x%lx, new_flags: 0x%lx\n", vma, vma->vm_flags, new_flags);
 		return 0;
 	}
 
@@ -206,13 +211,16 @@ static int madvise_update_vma(struct vm_area_struct *vma,
 	*prev = vma;
 
 	/* vm_flags is protected by the mmap_lock held in write mode. */
-	vma_start_write(vma);
+	vma_start_write(vma); // does nothing
+	printk(KERN_ALERT "smokewagon: madvise_update_vma() C. vma: 0x%p, vma->vm_flags: 0x%lx, new_flags: 0x%lx\n", vma, vma->vm_flags, new_flags);
 	vm_flags_reset(vma, new_flags);
+	printk(KERN_ALERT "smokewagon: madvise_update_vma() D. vma: 0x%p, vma->vm_flags: 0x%lx, new_flags: 0x%lx\n", vma, vma->vm_flags, new_flags);
 	if (!vma->vm_file || vma_is_anon_shmem(vma)) {
 		error = replace_anon_vma_name(vma, anon_name);
 		if (error)
 			return error;
 	}
+	printk(KERN_ALERT "smokewagon: madvise_update_vma() E. vma: 0x%p, vma->vm_flags: 0x%lx, new_flags: 0x%lx\n", vma, vma->vm_flags, new_flags);
 
 	return 0;
 }
@@ -1070,6 +1078,8 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 	int error;
 	struct anon_vma_name *anon_name;
 	unsigned long new_flags = vma->vm_flags;
+	if (behavior == 26)
+		printk(KERN_ALERT "smokewagon: madvise_vma_behavior() A. vma: %p, vma->vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
 
 	switch (behavior) {
 	case MADV_REMOVE:
@@ -1137,21 +1147,28 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 		return madvise_collapse(vma, prev, start, end);
 	case MADV_PRIVATE_TLB:
 		new_flags |= VM_SMOKEWAGON;
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior. behavior: %lu, vma: %p, prev: %p, start: %lu, end: %lu\n", behavior, vma, prev, start, end);
-		madvise_smokewagon(vma, prev, start, end, behavior);
+		printk(KERN_ALERT "smokewagon: madvise_vma_behavior() B. behavior: %lu, vma: %p, prev: %p, start: %lu, end: %lu\n", behavior, vma, prev, start, end);
+		printk(KERN_ALERT "smokewagon: madvise_vma_behavior() B. vma: %p, vma->vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
+		error = madvise_smokewagon(vma, prev, start, end, behavior);
 		break;
 	case MADV_NORMAL_TLB:
 		new_flags &= ~VM_SMOKEWAGON;
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior. behavior: %lu, vma: %p, prev: %p, start: %lu, end: %lu\n", behavior, vma, prev, start, end);
-		madvise_smokewagon(vma, prev, start, end, behavior);
+		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). behavior: %lu, vma: %p, prev: %p, start: %lu, end: %lu\n", behavior, vma, prev, start, end);
+		error = madvise_smokewagon(vma, prev, start, end, behavior);
 		break;
+	}
+
+	if (behavior == 26)
+		printk(KERN_ALERT "smokewagon: madvise_vma_behavior() C. vma: %p, vma->vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
 
 	anon_name = anon_vma_name(vma);
 	anon_vma_name_get(anon_name);
 	error = madvise_update_vma(vma, prev, start, end, new_flags,
 				   anon_name);
 	anon_vma_name_put(anon_name);
-	}
+
+	if (behavior == 26)
+		printk(KERN_ALERT "smokewagon: madvise_vma_behavior() D. vma: %p, vma->vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
 
 out:
 	/*
@@ -1160,6 +1177,8 @@ out:
 	 */
 	if (error == -ENOMEM)
 		error = -EAGAIN;
+	if (behavior == 26)
+		printk(KERN_ALERT "smokewagon: madvise_vma_behavior() E. vma: %p, vma->vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
 	return error;
 }
 
@@ -1465,7 +1484,7 @@ int do_madvise(struct mm_struct *mm, unsigned long start, size_t len_in, int beh
 	size_t len;
 	struct blk_plug plug;
 	if ((behavior == 26) || (behavior == 27) )
-		printk(KERN_ALERT "smokewagon: do_madvise. behavior: %d, mm: %p, start: %lu, len_in: %zu, \n", behavior, mm, start, len_in);
+		printk(KERN_ALERT "smokewagon: do_madvise. behavior: %d, mm: %p, start: 0x%lx, len_in: 0x%zx, \n", behavior, mm, start, len_in);
 
 	if (!madvise_behavior_valid(behavior))
 		return -EINVAL;

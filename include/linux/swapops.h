@@ -39,7 +39,7 @@
 				      sizeof(phys_addr_t) * 8 - PAGE_SHIFT, \
 				      SWP_TYPE_SHIFT)
 #endif	/* MAX_PHYSMEM_BITS */
-#define SWP_PFN_MASK		(BIT(SWP_PFN_BITS) - 1)
+#define SWP_PFN_MASK		(BIT(SWP_PFN_BITS) - 1 - 3) // smokewagon hack, remove top 4 bits because Pioneer uses them.
 
 /**
  * Migration swap entry specific bitfield definitions.  Layout:
@@ -117,6 +117,7 @@ static inline pgoff_t swp_offset(swp_entry_t entry)
 static inline unsigned long swp_offset_pfn(swp_entry_t entry)
 {
 	VM_BUG_ON(!is_pfn_swap_entry(entry));
+	printk(KERN_ALERT "smokewagon: swp_offset_pfn(). entry: 0x%lx, swp_offset(entry): 0x%lx, SWP_PFN_MASK: 0x%lx\n", entry.val, swp_offset(entry), SWP_PFN_MASK);
 	return swp_offset(entry) & SWP_PFN_MASK;
 }
 
@@ -163,25 +164,23 @@ static inline void *swp_to_radix_entry(swp_entry_t entry)
 {
 	return xa_mk_value(entry.val);
 }
+
 /*
-// TODO preserve accessed and dirty bits? should probably accept a pte_t instead of an offset
-static inline swp_entry_t make_smokewagon_entry(pgoff_t offset)
-{
-	return swp_entry(SWP_SMOKEWAGON, offset);
-}
-*/
-/*
- * A smokewagon pte is a swap entry that has the pte's permissions in low bits before swaptype
+ * A smokewagon pte is an (unfortunately) architecturally-specific swap entry that also contains PTE state bits.
  */
 static inline pte_t make_smokewagon_pte(pte_t pte)
 {
-	swp_entry_t swp = __swp_entry(SWP_SMOKEWAGON, pte_pfn(pte));
-	return __make_smokewagon_pte(pte, swp);
+	return __make_smokewagon_pte(pte, SWP_SMOKEWAGON);
 }
 
 static inline int is_smokewagon_entry(swp_entry_t entry)
 {
 	return unlikely(swp_type(entry) == SWP_SMOKEWAGON);
+}
+
+static inline unsigned long smokewagon_pfn(swp_entry_t entry)
+{
+	return __smokewagon_pfn(entry);
 }
 
 #if IS_ENABLED(CONFIG_DEVICE_PRIVATE)
@@ -510,7 +509,7 @@ static inline bool is_pfn_swap_entry(swp_entry_t entry)
 {
 	/* Make sure the swp offset can always store the needed fields */
 	BUILD_BUG_ON(SWP_TYPE_SHIFT < SWP_PFN_BITS);
-
+	printk(KERN_ALERT "is_pfn_swap_entry()\n");
 	return is_migration_entry(entry) || is_device_private_entry(entry) ||
 	       is_device_exclusive_entry(entry) || is_smokewagon_entry(entry);
 }

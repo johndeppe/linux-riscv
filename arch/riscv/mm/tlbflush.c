@@ -259,19 +259,20 @@ void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch)
 
 inline void smokewagon_load_tlb(struct vm_fault *vmf)
 {
+	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb() begin. ");
 	unsigned long vpn = vmf->address >> PAGE_SHIFT;
 	unsigned long asid = get_mm_asid(vmf->vma->vm_mm); // TODO: Does this need better locking?
 	unsigned long smeh = asid | SMEH_4KB_PAGE | (vpn << SMEH_VPN_SHIFT);
-	csr_write(CSR_SMEH, smeh);
 
 	unsigned long fixed = SMEL_CACHEABLE | SMEL_BUFFERABLE | SMEL_SHAREABLE | SMEL_TRUSTABLE | SMEL_VALID; // TODO check trustable by probing TLB and printing SMEH and SMEL at madvise time? 
 	unsigned long RWXUGADR = (GENMASK(9,1) & vmf->orig_pte.pte); // slightly worried about SMEL_VALID not matching the in-memory PTE but what can I do?
 	unsigned long pfn = swp_offset_pfn(__pte_to_swp_entry(vmf->orig_pte)) ;
 	unsigned long smel = fixed | (pfn << SMEL_PFN_SHIFT) | RWXUGADR;
-	csr_write(CSR_SMEL, smel);
 
 	unsigned long smcir = SMCIR_TLBWR; // might need ASID, or might only be needed for TLBIASID?
 
-	printk(KERN_ALERT "smokewagon_load_tlb(): asid: %ld , address: 0x%lx, vpn: 0x%lx pfn: 0x%lx\n", asid, vmf->address, vpn, pfn);
+	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb(). asid: %ld , address: 0x%lx, vpn: 0x%lx pfn: 0x%lx, smeh: 0x%lx, smel: 0x%lx, smcir: 0x%lx\n", asid, vmf->address, vpn, pfn, smeh, smel, smcir);
+	csr_write(CSR_SMEH, smeh);
+	csr_write(CSR_SMEL, smel);
 	csr_write(CSR_SMCIR, smcir);
 }

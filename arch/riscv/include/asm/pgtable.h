@@ -827,10 +827,22 @@ extern pmd_t pmdp_collapse_flush(struct vm_area_struct *vma,
 #define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
 #define __swp_entry_to_pte(x)	((pte_t) { (x).val })
 
-static inline pte_t __make_smokewagon_pte(pte_t old_pte, swp_entry_t swp)
+static inline pte_t __make_smokewagon_pte(pte_t old_pte, unsigned long swaptype)
 {
-	swp.val |= pte_val(old_pte) & GENMASK(__SWP_TYPE_SHIFT - 1, 1); // propagate permissions, leave V bit clear
+	swp_entry_t swp = __swp_entry(swaptype, pte_pfn(old_pte));
+	unsigned long kept_pte_bits_mask = GENMASK(63, 60) | GENMASK(__SWP_TYPE_SHIFT - 1, 1); // propagate pte permissions, leave V bit clear
+	unsigned long kept_pte_bits = pte_val(old_pte) & kept_pte_bits_mask;
+	swp.val |= kept_pte_bits;
+	printk(KERN_ALERT "smokewagon: __make_smokewagon_pte(). swaptype: 0x%lx, kept_pte_bits_mask: 0x%lx, kept_pte_bits: 0x%lx\n", swaptype, kept_pte_bits_mask, kept_pte_bits);
+	printk(KERN_ALERT "smokewagon: __make_smokewagon_pte(). old_pte: 0x%lx, new_pte: 0x%lx\n", pte_val(old_pte), pte_val(__swp_entry_to_pte(swp)));
 	return __swp_entry_to_pte(swp);
+}
+
+static inline unsigned long __smokewagon_pfn(swp_entry_t entry)
+{
+	unsigned long pfn = (entry.val & GENMASK(53 , __SWP_OFFSET_SHIFT)) >> __SWP_OFFSET_SHIFT;
+	printk(KERN_ALERT "smokewagon: __smokewagon_pfn(). entry: 0x%lx, pfn: 0x%lx\n", entry.val, pfn);
+	return pfn;
 }
 
 static inline int pte_swp_exclusive(pte_t pte)

@@ -3944,8 +3944,18 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 
 	entry = pte_to_swp_entry(vmf->orig_pte);
 	if (unlikely(non_swap_entry(entry))) {
-		if (is_smokewagon_entry(entry)) {
-			printk(KERN_ALERT "smokewagon: do_swap_page(). vmf->orig_pte: 0x%lx, pfn: %lx\n", vmf->orig_pte.pte, swp_offset_pfn(entry) );
+		printk(KERN_ALERT "smokewagon: do_swap_page() inside non_swap_entry(). entry: 0x%lx, vma: 0x%p, vma->vm_flags: 0x%lx\n", entry.val, vma, vma->vm_flags);
+		printk(KERN_ALERT "smokewagon: do_swap_page() inside non_swap_entry(). VM_SMOKEWAGON: 0x%lx, vma->vm_flags & VM_SMOKEWAGON: 0x%lx\n", VM_SMOKEWAGON, vma->vm_flags & VM_SMOKEWAGON);
+		if (vma->vm_flags & VM_SMOKEWAGON) {
+			printk(KERN_ALERT "smokewagon: do_swap_page() before. entry: 0x%lx, pfn: 0x%lu, vmf->pte: 0x%lx, vmf->orig_pte: 0x%lx\n"
+								"vmf->ptl: 0x%px\n", entry.val, swp_offset_pfn(entry), pte_val(ptep_get(vmf->pte)), pte_val(vmf->orig_pte), vmf->ptl);
+			vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd,
+					vmf->address, &vmf->ptl);
+			printk(KERN_ALERT "smokewagon: do_swap_page() locked. entry: 0x%lx, pfn: 0x%lu, vmf->pte: 0x%lx, vmf->orig_pte: 0x%lx\n"
+								"vmf->ptl: 0x%px\n", entry.val, swp_offset_pfn(entry), pte_val(ptep_get(vmf->pte)), pte_val(vmf->orig_pte), vmf->ptl);
+			pte_unmap_unlock(vmf->pte, vmf->ptl);
+			printk(KERN_ALERT "smokewagon: do_swap_page() unlocked. entry: 0x%lx, pfn: 0x%lu, vmf->pte: 0x%lx, vmf->orig_pte: 0x%lx\n"
+								"vmf->ptl: 0x%px\n", entry.val, swp_offset_pfn(entry), pte_val(ptep_get(vmf->pte)), pte_val(vmf->orig_pte), vmf->ptl);
 			smokewagon_load_tlb(vmf);
 		} else if (is_migration_entry(entry)) {
 			migration_entry_wait(vma->vm_mm, vmf->pmd,
@@ -5302,7 +5312,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 	}
 
 	if (!vmf->pte)
-		return do_pte_missing(vmf); // TODO add smokewagon PTE when not already faulted-in
+		return do_pte_missing(vmf);
 
 	if (!pte_present(vmf->orig_pte))
 		return do_swap_page(vmf);
