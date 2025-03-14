@@ -78,12 +78,13 @@ static int smokewagonify_pte(pte_t *ptep, unsigned long addr, unsigned long end,
 		  struct mm_walk *walk)
 {
 	pte_t pte = ptep_get(ptep);
-	printk(KERN_ALERT "smokewagon: smokewagonify_pte(). pte: 0x%lx, pfn: 0x%lx\n", pte.pte, pte_pfn(pte));
-	pte_t new_pte;
+	printk(KERN_ALERT "smokewagon: smokewagonify_pte(): pte: 0x%lx, pfn: 0x%lx\n", pte.pte, pte_pfn(pte));
 	if (pte.pte != 0) { // TODO think harder about what kinds of PTEs this can encounter: swap, not-faulted-in, others?
-		new_pte = make_smokewagon_pte(pte);
+		swp_entry_t smokewagon_entry = make_smokewagon_entry(pte_pfn(pte));
+		printk(KERN_ALERT "smokewagon: smokewagonify_pte(): smokewagon_entry: 0x%lx, smokewagon_pfn: 0x%lx, SWP_SMOKEWAGON: 0x%d\n", smokewagon_entry.val, swp_offset_pfn(smokewagon_entry), SWP_SMOKEWAGON);
+		pte_t new_pte = swp_entry_to_pte(smokewagon_entry);
+		printk(KERN_ALERT "smokewagon: smokewagonify_pte(): new_pte: 0x%lx, new_pte_pfn: 0x%lx\n", new_pte.pte, pte_pfn(new_pte));
 		set_pte_at(walk->mm, addr, ptep, new_pte);
-		printk(KERN_ALERT "smokewagon: smokewagonify_pte(). new_pte: 0x%lx, pfn: 0x%lx\n", new_pte.pte, smokewagon_pfn(__pte_to_swp_entry(new_pte)));
 	}
 	return 0;
 }
@@ -104,6 +105,7 @@ static long madvise_smokewagon(struct vm_area_struct *vma,
 			unsigned long behavior)
 {
 	printk(KERN_ALERT "smokewagon: madvise_smokewagon. behavior: %lu, start_addr: 0x%lx, end_addr: 0x%lx\n", behavior, start_addr, end_addr);
+	printk(KERN_ALERT "smokewagon: madvise_smokewagon. asid: %lx\n", atomic_long_read(&(vma->vm_mm->context.id)) & asid_mask);
 		switch (behavior) {
 		case MADV_PRIVATE_TLB:
 			int error = walk_page_range_vma(vma, start_addr, end_addr, &smokewagonify_walk_ops, 0);
@@ -196,10 +198,8 @@ static int madvise_update_vma(struct vm_area_struct *vma,
 	struct mm_struct *mm = vma->vm_mm;
 	int error;
 	VMA_ITERATOR(vmi, mm, start);
-	printk(KERN_ALERT "smokewagon: madvise_update_vma() A. vma: 0x%p, vma->vm_flags: 0x%lx, new_flags: 0x%lx\n", vma, vma->vm_flags, new_flags);
 	if (new_flags == vma->vm_flags && anon_vma_name_eq(anon_vma_name(vma), anon_name)) {
 		*prev = vma;
-		printk(KERN_ALERT "smokewagon: madvise_update_vma() B. vma: 0x%p, vma->vm_flags: 0x%lx, new_flags: 0x%lx\n", vma, vma->vm_flags, new_flags);
 		return 0;
 	}
 
@@ -211,16 +211,13 @@ static int madvise_update_vma(struct vm_area_struct *vma,
 	*prev = vma;
 
 	/* vm_flags is protected by the mmap_lock held in write mode. */
-	vma_start_write(vma); // does nothing
-	printk(KERN_ALERT "smokewagon: madvise_update_vma() C. vma: 0x%p, vma->vm_flags: 0x%lx, new_flags: 0x%lx\n", vma, vma->vm_flags, new_flags);
+	vma_start_write(vma);
 	vm_flags_reset(vma, new_flags);
-	printk(KERN_ALERT "smokewagon: madvise_update_vma() D. vma: 0x%p, vma->vm_flags: 0x%lx, new_flags: 0x%lx\n", vma, vma->vm_flags, new_flags);
 	if (!vma->vm_file || vma_is_anon_shmem(vma)) {
 		error = replace_anon_vma_name(vma, anon_name);
 		if (error)
 			return error;
 	}
-	printk(KERN_ALERT "smokewagon: madvise_update_vma() E. vma: 0x%p, vma->vm_flags: 0x%lx, new_flags: 0x%lx\n", vma, vma->vm_flags, new_flags);
 
 	return 0;
 }
@@ -1078,8 +1075,6 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 	int error;
 	struct anon_vma_name *anon_name;
 	unsigned long new_flags = vma->vm_flags;
-	if (behavior == 26)
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior() A. vma: %p, vma->vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
 
 	switch (behavior) {
 	case MADV_REMOVE:
@@ -1147,28 +1142,23 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 		return madvise_collapse(vma, prev, start, end);
 	case MADV_PRIVATE_TLB:
 		new_flags |= VM_SMOKEWAGON;
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior() B. behavior: %lu, vma: %p, prev: %p, start: %lu, end: %lu\n", behavior, vma, prev, start, end);
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior() B. vma: %p, vma->vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
+		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). behavior: %lu, vma: %p, prev: %p, start: %lu, end: %lu\n", behavior, vma, prev, start, end);
+		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). vma: %p, vma->vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
 		error = madvise_smokewagon(vma, prev, start, end, behavior);
 		break;
 	case MADV_NORMAL_TLB:
 		new_flags &= ~VM_SMOKEWAGON;
 		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). behavior: %lu, vma: %p, prev: %p, start: %lu, end: %lu\n", behavior, vma, prev, start, end);
+		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). vma: %p, vma->vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
 		error = madvise_smokewagon(vma, prev, start, end, behavior);
 		break;
 	}
-
-	if (behavior == 26)
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior() C. vma: %p, vma->vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
 
 	anon_name = anon_vma_name(vma);
 	anon_vma_name_get(anon_name);
 	error = madvise_update_vma(vma, prev, start, end, new_flags,
 				   anon_name);
 	anon_vma_name_put(anon_name);
-
-	if (behavior == 26)
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior() D. vma: %p, vma->vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
 
 out:
 	/*
@@ -1177,8 +1167,6 @@ out:
 	 */
 	if (error == -ENOMEM)
 		error = -EAGAIN;
-	if (behavior == 26)
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior() E. vma: %p, vma->vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
 	return error;
 }
 
@@ -1483,8 +1471,9 @@ int do_madvise(struct mm_struct *mm, unsigned long start, size_t len_in, int beh
 	int write;
 	size_t len;
 	struct blk_plug plug;
-	if ((behavior == 26) || (behavior == 27) )
-		printk(KERN_ALERT "smokewagon: do_madvise. behavior: %d, mm: %p, start: 0x%lx, len_in: 0x%zx, \n", behavior, mm, start, len_in);
+	if ((behavior == 26) || (behavior == 27) ) {
+		printk(KERN_ALERT "smokewagon: do_madvise. behavior: %d, mm: 0x%px, start: 0x%lx, len_in: 0x%zx, \n", behavior, mm, start, len_in);
+	}
 
 	if (!madvise_behavior_valid(behavior))
 		return -EINVAL;

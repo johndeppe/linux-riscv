@@ -238,6 +238,34 @@ void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch)
 }
 
 /*
+ * This printTLB probes and prints the shared jTLB. It's possible and likely that that
+ * other threads will be altering these contents as we read and write.
+ */
+static inline void print_tlb(void)
+{
+	for (unsigned long i = 0; i < 2048; i++) { // might be 1024 instead of 2048 TLB entries
+		unsigned long smcir = 1UL << 30;
+		csr_write(CSR_SMIR, i);
+		csr_write(CSR_SMCIR, smcir);
+		unsigned long smir = csr_read(CSR_SMIR);
+		unsigned long smeh = csr_read(CSR_SMEH);
+		unsigned long smel = csr_read(CSR_SMEL);
+
+		//unsigned long probe_hit = (smir >> 31) & 1UL;
+		//unsigned long multiple_hits = (smir >> 30) & 1UL;
+
+		unsigned long vpn = smeh >> 19;
+		unsigned long pg_size = (smeh & GENMASK(18,16)) >> 16;
+		unsigned long asid = smeh & GENMASK(15,0);
+
+		unsigned long pfn = (smel & GENMASK(37,10)) >> 10;
+		unsigned long prot = smel & GENMASK(9,0);
+
+		printk(KERN_ALERT "smokewagon: TLB: smir: %ld, smeh: %lx, pg_size: %ld, asid: %lx, vpn: %lx, smel: %lx, ppn: %lx, prot: %lx\n", smir, smeh, pg_size, asid, vpn, smel, pfn, prot);
+	}
+}
+
+/*
  * These constants and the smokewagon_load_tlb() function below load a specific
  * Smokewagon entry into the TLB  by twiddling CSRs.
  *
@@ -246,33 +274,33 @@ void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch)
 
 #define SMEH_VPN_SHIFT 19
 #define SMEH_4KB_PAGE 1UL << 16
-
-// SMEL has a Strongly Ordered bit at 63, but we want it to be 0.
-#define SMEL_CACHEABLE 1UL << 62
-#define SMEL_BUFFERABLE 1UL << 61
-#define SMEL_SHAREABLE 1UL << 60
-#define SMEL_TRUSTABLE 1UL << 59
 #define SMEL_PFN_SHIFT 10
-#define SMEL_VALID 1UL << 0
-
 #define SMCIR_TLBWR 1UL << 28
 
 inline void smokewagon_load_tlb(struct vm_fault *vmf)
 {
-	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb() begin. ");
+	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb() begin.\n");
 	unsigned long vpn = vmf->address >> PAGE_SHIFT;
 	unsigned long asid = get_mm_asid(vmf->vma->vm_mm); // TODO: Does this need better locking?
 	unsigned long smeh = asid | SMEH_4KB_PAGE | (vpn << SMEH_VPN_SHIFT);
+	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb(). smeh: 0x%lx, asid: 0x%lx , address: 0x%lx, vpn: 0x%lx\n", smeh, asid, vmf->address, vpn);
 
-	unsigned long fixed = SMEL_CACHEABLE | SMEL_BUFFERABLE | SMEL_SHAREABLE | SMEL_TRUSTABLE | SMEL_VALID; // TODO check trustable by probing TLB and printing SMEH and SMEL at madvise time? 
-	unsigned long RWXUGADR = (GENMASK(9,1) & vmf->orig_pte.pte); // slightly worried about SMEL_VALID not matching the in-memory PTE but what can I do?
-	unsigned long pfn = swp_offset_pfn(__pte_to_swp_entry(vmf->orig_pte)) ;
-	unsigned long smel = fixed | (pfn << SMEL_PFN_SHIFT) | RWXUGADR;
+	unsigned long pfn = swp_offset_pfn(pte_to_swp_entry(vmf->orig_pte));
+	pgprot_t prot = vm_get_page_prot(vmf->vma->vm_flags);
+	ALT_THEAD_PMA(prot);
+	unsigned long smel = (pfn << SMEL_PFN_SHIFT) | pgprot_val(prot);
+	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb(). smel: 0x%lx, pfn: 0x%lx, pg_prot: 0x%lx\n", smel, pfn, pgprot_val(prot));
 
-	unsigned long smcir = SMCIR_TLBWR; // might need ASID, or might only be needed for TLBIASID?
+	unsigned long smcir = SMCIR_TLBWR; // I think SMCIR only needs ASID for TLBIASID?
 
-	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb(). asid: %ld , address: 0x%lx, vpn: 0x%lx pfn: 0x%lx, smeh: 0x%lx, smel: 0x%lx, smcir: 0x%lx\n", asid, vmf->address, vpn, pfn, smeh, smel, smcir);
+	//printk(KERN_ALERT "smokewagon: pre-write: smeh: 0x%lx, smel: 0x%lx, smcir: 0x%lx\n", csr_read(CSR_SMEH), csr_read(CSR_SMEL), csr_read(CSR_SMCIR));
+
+	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb(). CSR write: smeh: 0x%lx, smel: 0x%lx, smcir: 0x%lx\n", smeh, smel, smcir);
+
+	// per Sitong Zhu, use csr_swap() instead?
 	csr_write(CSR_SMEH, smeh);
 	csr_write(CSR_SMEL, smel);
 	csr_write(CSR_SMCIR, smcir);
+	print_tlb();
+	//printk(KERN_ALERT "smokewagon: post-write: smeh: 0x%lx, smel: 0x%lx, smcir: 0x%lx\n", csr_read(CSR_SMEH), csr_read(CSR_SMEL), csr_read(CSR_SMCIR));
 }

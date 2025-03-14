@@ -39,7 +39,7 @@
 				      sizeof(phys_addr_t) * 8 - PAGE_SHIFT, \
 				      SWP_TYPE_SHIFT)
 #endif	/* MAX_PHYSMEM_BITS */
-#define SWP_PFN_MASK		(BIT(SWP_PFN_BITS) - 1 - 3) // smokewagon hack, remove top 4 bits because Pioneer uses them.
+#define SWP_PFN_MASK		(BIT(SWP_PFN_BITS) - 1)
 
 /**
  * Migration swap entry specific bitfield definitions.  Layout:
@@ -117,7 +117,7 @@ static inline pgoff_t swp_offset(swp_entry_t entry)
 static inline unsigned long swp_offset_pfn(swp_entry_t entry)
 {
 	VM_BUG_ON(!is_pfn_swap_entry(entry));
-	printk(KERN_ALERT "smokewagon: swp_offset_pfn(). entry: 0x%lx, swp_offset(entry): 0x%lx, SWP_PFN_MASK: 0x%lx\n", entry.val, swp_offset(entry), SWP_PFN_MASK);
+	printk(KERN_ALERT "smokewagon: swp_offset_pfn(): entry: 0x%lx, pfn: 0x%lx, swp_offset(entry): 0x%lx, SWP_PFN_MASK: 0x%lx\n", entry.val, swp_offset(entry) & SWP_PFN_MASK, swp_offset(entry), SWP_PFN_MASK);
 	return swp_offset(entry) & SWP_PFN_MASK;
 }
 
@@ -165,12 +165,9 @@ static inline void *swp_to_radix_entry(swp_entry_t entry)
 	return xa_mk_value(entry.val);
 }
 
-/*
- * A smokewagon pte is an (unfortunately) architecturally-specific swap entry that also contains PTE state bits.
- */
-static inline pte_t make_smokewagon_pte(pte_t pte)
+static inline swp_entry_t make_smokewagon_entry(pgoff_t offset)
 {
-	return __make_smokewagon_pte(pte, SWP_SMOKEWAGON);
+	return swp_entry(SWP_SMOKEWAGON, offset);
 }
 
 static inline int is_smokewagon_entry(swp_entry_t entry)

@@ -12,6 +12,14 @@ static void tlb_flush(struct mmu_gather *tlb);
 
 inline void smokewagon_load_tlb(struct vm_fault *vmf);
 
+static inline void printUL(unsigned long ul)
+{
+	printk(KERN_CONT "0b");
+	for(int i = 64; i < 0; i--) {
+		printk(KERN_CONT "%lu", (ul & i) >> i);
+	}
+}
+
 #ifdef CONFIG_MMU
 #include <linux/swap.h>
 

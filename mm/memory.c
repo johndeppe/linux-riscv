@@ -3947,16 +3947,14 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 		printk(KERN_ALERT "smokewagon: do_swap_page() inside non_swap_entry(). entry: 0x%lx, vma: 0x%p, vma->vm_flags: 0x%lx\n", entry.val, vma, vma->vm_flags);
 		printk(KERN_ALERT "smokewagon: do_swap_page() inside non_swap_entry(). VM_SMOKEWAGON: 0x%lx, vma->vm_flags & VM_SMOKEWAGON: 0x%lx\n", VM_SMOKEWAGON, vma->vm_flags & VM_SMOKEWAGON);
 		if (vma->vm_flags & VM_SMOKEWAGON) {
-			printk(KERN_ALERT "smokewagon: do_swap_page() before. entry: 0x%lx, pfn: 0x%lu, vmf->pte: 0x%lx, vmf->orig_pte: 0x%lx\n"
-								"vmf->ptl: 0x%px\n", entry.val, swp_offset_pfn(entry), pte_val(ptep_get(vmf->pte)), pte_val(vmf->orig_pte), vmf->ptl);
+			printk(KERN_ALERT "smokewagon: do_swap_page() prelock. entry: 0x%lx, pfn: 0x%lu, vmf->orig_pte: 0x%lx\n",
+								entry.val, swp_offset_pfn(entry), pte_val(vmf->orig_pte));
 			vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd,
 					vmf->address, &vmf->ptl);
-			printk(KERN_ALERT "smokewagon: do_swap_page() locked. entry: 0x%lx, pfn: 0x%lu, vmf->pte: 0x%lx, vmf->orig_pte: 0x%lx\n"
-								"vmf->ptl: 0x%px\n", entry.val, swp_offset_pfn(entry), pte_val(ptep_get(vmf->pte)), pte_val(vmf->orig_pte), vmf->ptl);
-			pte_unmap_unlock(vmf->pte, vmf->ptl);
-			printk(KERN_ALERT "smokewagon: do_swap_page() unlocked. entry: 0x%lx, pfn: 0x%lu, vmf->pte: 0x%lx, vmf->orig_pte: 0x%lx\n"
-								"vmf->ptl: 0x%px\n", entry.val, swp_offset_pfn(entry), pte_val(ptep_get(vmf->pte)), pte_val(vmf->orig_pte), vmf->ptl);
+			printk(KERN_ALERT "smokewagon: do_swap_page() locked. vmf->pte: 0x%lx, vmf->orig_pte: 0x%lx\n",
+								pte_val(ptep_get(vmf->pte)), pte_val(vmf->orig_pte));
 			smokewagon_load_tlb(vmf);
+			goto unlock;
 		} else if (is_migration_entry(entry)) {
 			migration_entry_wait(vma->vm_mm, vmf->pmd,
 					     vmf->address);
@@ -4494,7 +4492,7 @@ setpte:
 		entry = pte_mkuffd_wp(entry);
 	} else if (vma->vm_flags & VM_SMOKEWAGON) {
 		printk(KERN_ALERT "smokewagon: do_anonymous_page(): pfn: %ld\n", pte_pfn(entry));
-		entry = make_smokewagon_pte(entry);
+		entry = swp_entry_to_pte(make_smokewagon_entry(pte_pfn(entry)));
 	}
 	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr_pages);
 
