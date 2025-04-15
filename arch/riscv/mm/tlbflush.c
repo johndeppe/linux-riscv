@@ -238,12 +238,12 @@ void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch)
 }
 
 /*
- * This printTLB probes and prints the shared jTLB. It's possible and likely that that
+ * print_tlb() probes and prints the jTLB shared by 4 T-Head harts. It's possible and likely that that
  * other threads will be altering these contents as we read and write.
  */
 static inline void print_tlb(void)
 {
-	for (unsigned long i = 0; i < 2048; i++) { // might be 1024 instead of 2048 TLB entries
+	for (unsigned long i = 0; i < 2048; i++) {
 		unsigned long smcir = 1UL << 30;
 		csr_write(CSR_SMIR, i);
 		csr_write(CSR_SMCIR, smcir);
@@ -261,7 +261,7 @@ static inline void print_tlb(void)
 		unsigned long pfn = (smel & GENMASK(37,10)) >> 10;
 		unsigned long prot = smel & GENMASK(9,0);
 
-		printk(KERN_ALERT "smokewagon: TLB: smir: %ld, smeh: %lx, pg_size: %ld, asid: %lx, vpn: %lx, smel: %lx, ppn: %lx, prot: %lx\n", smir, smeh, pg_size, asid, vpn, smel, pfn, prot);
+		printk(KERN_ALERT "smokewagon: TLB: cpuid: %d, smir: %ld, pg_size: %ld, asid: %lx, vpn: %lx, ppn: %lx, prot: %lx, smeh: %lx, smel: %lx\n", smp_processor_id(), smir, pg_size, asid, vpn, pfn, prot, smeh, smel);
 	}
 }
 
@@ -277,30 +277,42 @@ static inline void print_tlb(void)
 #define SMEL_PFN_SHIFT 10
 #define SMCIR_TLBWR 1UL << 28
 
+/* enter with VMA read-locked and PTE locked from do_swap_page()
+   we rely on the PTE lock to serialize accessing cpumask for the associated page */
 inline void smokewagon_load_tlb(struct vm_fault *vmf)
 {
-	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb() begin.\n");
+	/* construct smeh */
 	unsigned long vpn = vmf->address >> PAGE_SHIFT;
 	unsigned long asid = get_mm_asid(vmf->vma->vm_mm); // TODO: Does this need better locking?
 	unsigned long smeh = asid | SMEH_4KB_PAGE | (vpn << SMEH_VPN_SHIFT);
-	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb(). smeh: 0x%lx, asid: 0x%lx , address: 0x%lx, vpn: 0x%lx\n", smeh, asid, vmf->address, vpn);
 
+	/* construct smel */
 	unsigned long pfn = swp_offset_pfn(pte_to_swp_entry(vmf->orig_pte));
 	pgprot_t prot = vm_get_page_prot(vmf->vma->vm_flags);
 	ALT_THEAD_PMA(prot);
 	unsigned long smel = (pfn << SMEL_PFN_SHIFT) | pgprot_val(prot);
-	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb(). smel: 0x%lx, pfn: 0x%lx, pg_prot: 0x%lx\n", smel, pfn, pgprot_val(prot));
 
+	/* construct smcir */
 	unsigned long smcir = SMCIR_TLBWR; // I think SMCIR only needs ASID for TLBIASID?
 
-	//printk(KERN_ALERT "smokewagon: pre-write: smeh: 0x%lx, smel: 0x%lx, smcir: 0x%lx\n", csr_read(CSR_SMEH), csr_read(CSR_SMEL), csr_read(CSR_SMCIR));
+	/* debug kprint, remove */
+	cpumask_t before = vmf->vma->vm_mm->context.smokewagon_masks[vpn];
+	char before_buf[NR_CPUS+1];
+	for (size_t i=0; i<nr_cpu_ids;i++) {before_buf[i] = cpumask_test_cpu(i,&before) ? '1' : '0';}
+	before_buf[nr_cpu_ids] = '\0';
+	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb(). smp_processor_id: %d, vpn: 0x%lx, before: %s\n", smp_processor_id(), vpn, before_buf);
 
-	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb(). CSR write: smeh: 0x%lx, smel: 0x%lx, smcir: 0x%lx\n", smeh, smel, smcir);
+	cpumask_set_cpu(smp_processor_id(), &vmf->vma->vm_mm->context.smokewagon_masks[vpn]);
 
-	// per Sitong Zhu, use csr_swap() instead?
+	/* debug kprint, remove */
+	cpumask_t after = vmf->vma->vm_mm->context.smokewagon_masks[vpn];
+	char after_buf[NR_CPUS+1];
+	for (size_t i=0; i<nr_cpu_ids;i++) {after_buf[i] = cpumask_test_cpu(i,&after) ? '1' : '0';}
+	after_buf[nr_cpu_ids] = '\0';
+	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb(). smp_processor_id: %d, vpn: 0x%lx, after: %s\n", smp_processor_id(), vpn, after_buf);
+
 	csr_write(CSR_SMEH, smeh);
 	csr_write(CSR_SMEL, smel);
 	csr_write(CSR_SMCIR, smcir);
-	print_tlb();
-	//printk(KERN_ALERT "smokewagon: post-write: smeh: 0x%lx, smel: 0x%lx, smcir: 0x%lx\n", csr_read(CSR_SMEH), csr_read(CSR_SMEL), csr_read(CSR_SMCIR));
+	//print_tlb();
 }

@@ -827,13 +827,6 @@ extern pmd_t pmdp_collapse_flush(struct vm_area_struct *vma,
 #define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
 #define __swp_entry_to_pte(x)	((pte_t) { (x).val })
 
-static inline unsigned long __smokewagon_pfn(swp_entry_t entry)
-{
-	unsigned long pfn = (entry.val & GENMASK(53 , __SWP_OFFSET_SHIFT)) >> __SWP_OFFSET_SHIFT;
-	printk(KERN_ALERT "smokewagon: __smokewagon_pfn(). entry: 0x%lx, pfn: 0x%lx\n", entry.val, pfn);
-	return pfn;
-}
-
 static inline int pte_swp_exclusive(pte_t pte)
 {
 	return pte_val(pte) & _PAGE_SWP_EXCLUSIVE;

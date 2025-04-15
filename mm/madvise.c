@@ -95,32 +95,73 @@ static const struct mm_walk_ops smokewagonify_walk_ops = {
 };
 
 /*
+ * desmokewagonify_pte - pagewalk pte_entry callback
+ *
+ * Change a smokewagon pte to a regular pte, clearing cpumasks along the way.
+ */
+static int desmokewagonify_pte(pte_t *ptep, unsigned long addr, unsigned long end,
+	struct mm_walk *walk)
+{
+	pte_t pte = ptep_get(ptep);
+	swp_entry_t swp = pte_to_swp_entry(pte);
+	printk(KERN_ALERT "smokewagon: desmokewagonify_pte(): pte: 0x%lx, pfn: 0x%lx\n", pte.pte, pte_pfn(pte));
+	if (is_smokewagon_entry(swp)) {
+		printk(KERN_ALERT "smokewagon: desmokewagonify_pte(): swp: 0x%lx, swp_pfn: 0x%lx\n", swp.val, swp_offset_pfn(swp));
+		pte_t new_pte = pfn_pte(swp_offset_pfn(swp), vm_get_page_prot(walk->vma->vm_flags));
+		printk(KERN_ALERT "smokewagon: desmokewagonify_pte(): new_pte: 0x%lx, new_pte_pfn: 0x%lx\n", new_pte.pte, pte_pfn(new_pte));
+		set_pte_at(walk->mm, addr, ptep, new_pte);
+		// need to lock VMA? 
+		cpumask_clear_cpu(smp_processor_id(), &walk->mm->context.smokewagon_masks[addr >> PAGE_SHIFT]);
+	}
+	return 0;
+}
+
+static const struct mm_walk_ops desmokewagonify_walk_ops = {
+	.pte_entry	= desmokewagonify_pte,
+	.walk_lock	= PGWALK_WRLOCK,
+};
+
+/*
  * Enter with mmap_lock from do_madvise.
- * Smokewagonify: Set smokewagon VMA bit PTEs so page faults won't be confused.
- * Desmokewagonify: TODO: think about this more. Clear VMA bit first or set PTEs first?
+ * Smokewagonify: Set smokewagon VMA bit before PTEs so page faults won't be confused.
+ * Desmokewagonify: Set PTEs first then clear VMA bit.
  */
 static long madvise_smokewagon(struct vm_area_struct *vma,
 			struct vm_area_struct **prev,
 			unsigned long start_addr, unsigned long end_addr,
 			unsigned long behavior)
 {
-	printk(KERN_ALERT "smokewagon: madvise_smokewagon. behavior: %lu, start_addr: 0x%lx, end_addr: 0x%lx\n", behavior, start_addr, end_addr);
-	printk(KERN_ALERT "smokewagon: madvise_smokewagon. asid: %lx\n", atomic_long_read(&(vma->vm_mm->context.id)) & asid_mask);
+	long unsigned num_pages = (end_addr - start_addr) >> PAGE_SHIFT;
+	printk(KERN_ALERT "smokewagon: madvise_smokewagon(). behavior: %lu, asid: 0x%lx, start_addr: 0x%lx, end_addr: 0x%lx, num_pages: %lu\n", behavior, atomic_long_read(&(vma->vm_mm->context.id)) & asid_mask, start_addr, end_addr, num_pages);
+	int error = 0;
 		switch (behavior) {
 		case MADV_PRIVATE_TLB:
-			int error = walk_page_range_vma(vma, start_addr, end_addr, &smokewagonify_walk_ops, 0);
-			printk(KERN_ALERT "smokewagon: madvise_smokewagon's flush_tlb_range().");
-			flush_tlb_range(vma, start_addr, end_addr);
+			/*
+			 * If we haven't already, kvcalloc a LARGE array of cpumasks, one mask per page in virtual userspace.
+			 * Aspirationally, it would be nice to swap to cpumask storage that we could deallocate, such
+			 * as smaller arrays attached to VMAs. However, VMA merging is a mess I want to avoid.
+			 */
+			if (!vma->vm_mm->context.smokewagon_masks) {
+				vma->vm_mm->context.smokewagon_masks = kvcalloc(TASK_SIZE >> PAGE_SHIFT, sizeof(cpumask_t), GFP_KERNEL);
+				if (!vma->vm_mm->context.smokewagon_masks) {
+					printk(KERN_ALERT "smokewagon: madvise_smokewagon(). kvcalloc failed.");
+					return -ENOMEM;
+				}
+			}
+			/* page walk doesn't allocate, won't fail */
+			walk_page_range_vma(vma, start_addr, end_addr, &smokewagonify_walk_ops, 0);
 			break;
 		case MADV_NORMAL_TLB:
-			// TODO revalidate PTEs
-			// don't need to flush TLBs?
+			walk_page_range_vma(vma, start_addr, end_addr, &desmokewagonify_walk_ops, 0);
 			break;
 		default:
-			BUG_ON((behavior != 26) || (behavior != 27));
+			BUG();
 	}
-	// TODO start track PTEs TLB residence
-	return 0; // TODO return errors as appropriate
+	// printk(KERN_ALERT "smokewagon: madvise_smokewagon()'s flush_tlb_range(). error: %d\n", error);
+	flush_tlb_range(vma, start_addr, end_addr); // might not need this for the normal case?
+
+	// TODO start tracking PTEs TLB residence
+	return error;
 }
 
 #ifdef CONFIG_ANON_VMA_NAME
@@ -1141,15 +1182,17 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 	case MADV_COLLAPSE:
 		return madvise_collapse(vma, prev, start, end);
 	case MADV_PRIVATE_TLB:
-		new_flags |= VM_SMOKEWAGON;
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). behavior: %lu, vma: %p, prev: %p, start: %lu, end: %lu\n", behavior, vma, prev, start, end);
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). vma: %p, vma->vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
+		new_flags |= VM_SMOKEWAGON; // TODO: Set smokewagon VMA bit before PTEs so page faults won't be confused.
+		//printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). behavior: %lu, vma: 0x%p, prev: 0x%p, start: %lu, end: %lu\n", behavior, vma, prev, start, end);
+		//printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). vma: %p, vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
 		error = madvise_smokewagon(vma, prev, start, end, behavior);
+		if (error)
+			goto out;
 		break;
 	case MADV_NORMAL_TLB:
 		new_flags &= ~VM_SMOKEWAGON;
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). behavior: %lu, vma: %p, prev: %p, start: %lu, end: %lu\n", behavior, vma, prev, start, end);
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). vma: %p, vma->vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
+		//printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). behavior: %lu, vma: 0x%p, prev: 0x%p, start: %lu, end: %lu\n", behavior, vma, prev, start, end);
+		//printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). vma: %p, vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
 		error = madvise_smokewagon(vma, prev, start, end, behavior);
 		break;
 	}
@@ -1471,9 +1514,7 @@ int do_madvise(struct mm_struct *mm, unsigned long start, size_t len_in, int beh
 	int write;
 	size_t len;
 	struct blk_plug plug;
-	if ((behavior == 26) || (behavior == 27) ) {
-		printk(KERN_ALERT "smokewagon: do_madvise. behavior: %d, mm: 0x%px, start: 0x%lx, len_in: 0x%zx, \n", behavior, mm, start, len_in);
-	}
+	// if ((behavior == 26) || (behavior == 27) ) printk(KERN_ALERT "smokewagon: do_madvise. behavior: %d, mm: 0x%px, start: 0x%lx, len_in: 0x%zx, \n", behavior, mm, start, len_in);
 
 	if (!madvise_behavior_valid(behavior))
 		return -EINVAL;

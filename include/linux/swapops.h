@@ -117,7 +117,7 @@ static inline pgoff_t swp_offset(swp_entry_t entry)
 static inline unsigned long swp_offset_pfn(swp_entry_t entry)
 {
 	VM_BUG_ON(!is_pfn_swap_entry(entry));
-	printk(KERN_ALERT "smokewagon: swp_offset_pfn(): entry: 0x%lx, pfn: 0x%lx, swp_offset(entry): 0x%lx, SWP_PFN_MASK: 0x%lx\n", entry.val, swp_offset(entry) & SWP_PFN_MASK, swp_offset(entry), SWP_PFN_MASK);
+	//printk(KERN_ALERT "smokewagon: swp_offset_pfn(): entry: 0x%lx, pfn: 0x%lx, swp_offset(entry): 0x%lx, SWP_PFN_MASK: 0x%lx\n", entry.val, swp_offset(entry) & SWP_PFN_MASK, swp_offset(entry), SWP_PFN_MASK);
 	return swp_offset(entry) & SWP_PFN_MASK;
 }
 
@@ -172,12 +172,7 @@ static inline swp_entry_t make_smokewagon_entry(pgoff_t offset)
 
 static inline int is_smokewagon_entry(swp_entry_t entry)
 {
-	return unlikely(swp_type(entry) == SWP_SMOKEWAGON);
-}
-
-static inline unsigned long smokewagon_pfn(swp_entry_t entry)
-{
-	return __smokewagon_pfn(entry);
+	return swp_type(entry) == SWP_SMOKEWAGON;
 }
 
 #if IS_ENABLED(CONFIG_DEVICE_PRIVATE)
