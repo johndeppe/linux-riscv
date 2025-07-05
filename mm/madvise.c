@@ -80,6 +80,7 @@ static int smokewagonify_ptes(pmd_t *pmd, unsigned long addr,
 {
 	pte_t *ptep, pte;
 	spinlock_t *ptl;
+	cpumask_t *masks = walk->mm->context.smokewagon_masks;
 
 	ptep = pte_offset_map_lock(walk->mm, pmd, addr, &ptl);
 	if (!ptep) {
@@ -97,6 +98,7 @@ static int smokewagonify_ptes(pmd_t *pmd, unsigned long addr,
 		// printk(KERN_ALERT "smokewagon: smokewagonify_ptes(): smokewagon_entry: 0x%lx, smokewagon_pfn: 0x%lx, SWP_SMOKEWAGON: 0x%d\n", smokewagon_entry.val, swp_offset_pfn(smokewagon_entry), SWP_SMOKEWAGON);
 		pte_t new_pte = swp_entry_to_pte(smokewagon_entry);
 		//printk(KERN_ALERT "smokewagon: smokewagonify_ptes(): pte: 0x%lx, pfn: 0x%lx, new_pte: 0x%lx, new_pte_pfn: 0x%lx\n", pte.pte, pte_pfn(pte), new_pte.pte, pte_pfn(new_pte));
+		cpumask_copy(&masks[addr >> PAGE_SHIFT], mm_cpumask(walk->mm));
 		set_pte_at(walk->mm, addr, ptep, new_pte);
 	}
 	pte_unmap_unlock(ptep - 1, ptl);
@@ -122,9 +124,6 @@ static long madvise_smokewagon(struct vm_area_struct *vma,
 	/* page walk doesn't allocate, won't fail
 	 * use walk_page_range_vma() since madvise_walk_vmas() already walks vmas */
 	walk_page_range_vma(vma, start_addr, end_addr, &smokewagonify_walk_ops, 0);
-	flush_tlb_range(vma, start_addr, end_addr); // not filtered because VM_SMOKEWAGON is set later
-	// TODO: see if we can do a bigger batch flush instead of these little flushes broken up by the VMA walk?
-	// have to look out for cases where a fault can sneak in and leave weirdness
 	return 0;
 }
 
