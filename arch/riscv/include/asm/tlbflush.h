@@ -63,6 +63,9 @@ void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch);
 static inline void flush_tlb_range(struct vm_area_struct *vma,
 		unsigned long start, unsigned long end)
 {
+	if(vma && vma->vm_flags & VM_SMOKEWAGON)
+		printk(KERN_ALERT "smokewagon: flush_tlb_range(): cpu %2d, mm: 0x%p, vma: 0x%p, start: 0x%lx, end: 0x%lx\n",
+			smp_processor_id(), vma->vm_mm, vma, start, end);
 	local_flush_tlb_all();
 }
 

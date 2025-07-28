@@ -3950,7 +3950,7 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 			//printk(KERN_ALERT "smokewagon: do_swap_page() prelock. entry: 0x%lx, pfn: 0x%lu, vmf->orig_pte: 0x%lx\n", entry.val, swp_offset_pfn(entry), pte_val(vmf->orig_pte));
 			vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd,
 					vmf->address, &vmf->ptl);
-			//printk(KERN_ALERT "smokewagon: do_swap_page() locked. vmf->pte: 0x%lx, vmf->orig_pte: 0x%lx\n", pte_val(ptep_get(vmf->pte)), pte_val(vmf->orig_pte));
+			printk(KERN_ALERT "smokewagon: do_swap_page() locked. vmf->pte: 0x%lx, vmf->orig_pte: 0x%lx, vmf->flags 0x%x\nsmokewagon: do_swap_page() locked. pte_pfn: 0x%lx, swp_pfn: 0x%lx\n", pte_val(ptep_get(vmf->pte)), pte_val(vmf->orig_pte), vmf->flags, pte_pfn(ptep_get(vmf->pte)), swp_offset_pfn(entry));
 			smokewagon_load_tlb(vmf);
 			goto unlock;
 		} else if (is_migration_entry(entry)) {
@@ -4489,10 +4489,21 @@ setpte:
 	if (uffd_wp) {
 		entry = pte_mkuffd_wp(entry);
 	} else if (vma->vm_flags & VM_SMOKEWAGON) {
-		printk(KERN_ALERT "smokewagon: do_anonymous_page(): pfn: %ld\n", pte_pfn(entry));
-		entry = swp_entry_to_pte(make_smokewagon_entry(pte_pfn(entry)));
+		unsigned long pfn = pte_pfn(entry);
+		swp_entry_t swp_entry = make_smokewagon_entry(pfn);
+		unsigned long old_entry = pte_val(entry);
+		entry = swp_entry_to_pte(swp_entry);
+		printk(KERN_ALERT "smokewagon: do_anonymous_page(): cpu: %2d, vpn: 0x%lx, pfn: 0x%lx, old_entry: 0x%lx, vmf->flags: 0x%x\n"
+			"smokewagon: do_anonymous_page(): cpu: %2d, swp_pfn: 0x%lx, swp_entry: 0x%lx, entry: 0x%lx, vma->vm_page_prot: 0x%lx\n",
+			smp_processor_id(), addr >> PAGE_SHIFT, pfn, old_entry, vmf->flags,
+			smp_processor_id(), swp_offset_pfn(swp_entry), swp_entry.val, entry.pte, pgprot_val(vma->vm_page_prot));
+		printk(KERN_ALERT "smokewagon: do_anonymous_page()(). vm_flags: 0x%lx, VM_READ: %lx, VM_WRITE: %lx, VM_EXEC: %lx, VM_SHARED: %lx, VM_SMOKEWAGON: %lx, VM_MAYREAD: %lx, VM_MAYWRITE: %lx, VM_MAYEXEC: %lx, VM_MAYSHARE: %lx\n", vma->vm_flags, vma->vm_flags & VM_READ, vma->vm_flags & VM_WRITE, vma->vm_flags & VM_EXEC, vma->vm_flags & VM_SHARED, vma->vm_flags & VM_SMOKEWAGON, vma->vm_flags & VM_MAYREAD, vma->vm_flags & VM_MAYWRITE, vma->vm_flags & VM_MAYEXEC, vma->vm_flags & VM_MAYSHARE);
+		printk(KERN_ALERT "smokewagon: do_anonymous_page()(). vm_page_prot: 0x%lx, PAGE_READ: %lx, PAGE_WRITE: %lx, PAGE_EXEC: %lx\n", pgprot_val(vma->vm_page_prot), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_READ), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_WRITE), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_EXEC));
+		//smokewagon_load_tlb(vmf);
 	}
+	if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: do_anonymous_page() before set: cpu: %2d, pte: 0x%lx, entry: 0x%lx, nr_pages: %d\n", smp_processor_id(), pte_val(ptep_get(vmf->pte)), pte_val(entry), nr_pages);
 	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr_pages);
+	if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: do_anonymous_page()  after set: cpu: %2d, pte: 0x%lx, entry: 0x%lx, nr_pages: %d\n", smp_processor_id(), pte_val(ptep_get(vmf->pte)), pte_val(entry), nr_pages);
 
 	/* No need to invalidate - it was non-present before */
 	update_mmu_cache_range(vmf, vma, addr, vmf->pte, nr_pages);
@@ -5307,8 +5318,12 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 		}
 	}
 
+	//if (vmf->vma->vm_flags & VM_SMOKEWAGON)	printk(KERN_ALERT "smokewagon: handle_pte_fault 1: cpu: %2d, vpn: 0x%lx\n", smp_processor_id(), vmf->address >> PAGE_SHIFT);
+
 	if (!vmf->pte)
 		return do_pte_missing(vmf);
+
+	//if (vmf->vma->vm_flags & VM_SMOKEWAGON)	printk(KERN_ALERT "smokewagon: handle_pte_fault 2: cpu: %2d, vpn: 0x%lx\n", smp_processor_id(), vmf->address >> PAGE_SHIFT);
 
 	if (!pte_present(vmf->orig_pte))
 		return do_swap_page(vmf);

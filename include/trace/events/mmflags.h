@@ -175,6 +175,7 @@ IF_HAVE_PG_ARCH_X(arch_3)
 	{VM_MAYSHARE,			"mayshare"	},		\
 	{VM_GROWSDOWN,			"growsdown"	},		\
 	{VM_UFFD_MISSING,		"uffd_missing"	},		\
+	{VM_SMOKEWAGON,			"smokewawgon"	},		\
 IF_HAVE_UFFD_MINOR(VM_UFFD_MINOR,	"uffd_minor"	)		\
 	{VM_PFNMAP,			"pfnmap"	},		\
 	{VM_UFFD_WP,			"uffd_wp"	},		\
