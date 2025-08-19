@@ -81,6 +81,7 @@
 
 #define MADV_PRIVATE_TLB	26	/* likely hart-private, try to reduce shootdowns */
 #define MADV_NORMAL_TLB	27	/* un-set hart-private property */
+#define MADV_PROBE_TLB	28	/* probe TLB for first page in area */
 
 /* compatibility flags */
 #define MAP_FILE	0

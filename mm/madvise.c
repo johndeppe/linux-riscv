@@ -60,6 +60,7 @@ static int madvise_need_mmap_write(int behavior)
 	case MADV_POPULATE_READ:
 	case MADV_POPULATE_WRITE:
 	case MADV_COLLAPSE:
+	case MADV_PROBE_TLB:
 		return 0;
 	case MADV_PRIVATE_TLB:
 	case MADV_NORMAL_TLB:
@@ -104,8 +105,12 @@ static int smokewagonify_ptes(pmd_t *pmd, unsigned long addr,
 		char debug_buf[NR_CPUS+1];
 		for (size_t i=0; i<nr_cpu_ids;i++) {debug_buf[i] = cpumask_test_cpu(i,&masks[addr >> PAGE_SHIFT]) ? '1' : '0';}
 		debug_buf[nr_cpu_ids] = '\0';
-		printk(KERN_ALERT "smokewagon: smokewagonify_ptes(): cpu: %2d, vpn: 0x%lx, cpumask: %s\nsmokewagon: smokewagonify_ptes(): cpu: %2d, pfn: 0x%lx, pte: 0x%lx, smokewagon_entry: 0x%lx\n", smp_processor_id(), addr >> PAGE_SHIFT, debug_buf, smp_processor_id(), pte_pfn(pte), pte.pte, smokewagon_entry.val);
-		printk(KERN_ALERT "smokewagon: smokewagonify_ptes(): pte: %lx, V: %lx, R: %lx, W: %lx, X: %lx, U: %lx, G: %lx, A: %lx, D: %lx\n", pte.pte, pte.pte & _PAGE_PRESENT, pte.pte & _PAGE_READ, pte.pte & _PAGE_WRITE, pte.pte & _PAGE_EXEC, pte.pte & _PAGE_USER, pte.pte & _PAGE_GLOBAL, pte.pte & _PAGE_ACCESSED, pte.pte & _PAGE_DIRTY);
+		printk(KERN_ALERT "smokewagon: smokewagonify_ptes(): cpu: %2d, vpn: 0x%lx, cpumask: %s\n"
+						  "                                  pfn: 0x%lx, smokewagon_entry: 0x%lx\n"
+						  "                                  pte: %lx, V: %lx, R: %lx, W: %lx, X: %lx, U: %lx, G: %lx, A: %lx, D: %lx\n",
+			smp_processor_id(), addr >> PAGE_SHIFT, debug_buf,
+			pte_pfn(pte), smokewagon_entry.val,
+			pte.pte, pte.pte & _PAGE_PRESENT, pte.pte & _PAGE_READ, pte.pte & _PAGE_WRITE, pte.pte & _PAGE_EXEC, pte.pte & _PAGE_USER, pte.pte & _PAGE_GLOBAL, pte.pte & _PAGE_ACCESSED, pte.pte & _PAGE_DIRTY);
 	}
 	pte_unmap_unlock(ptep - 1, ptl);
 	return 0;
@@ -1211,12 +1216,16 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 		return madvise_collapse(vma, prev, start, end);
 	case MADV_PRIVATE_TLB:
 		new_flags |= VM_SMOKEWAGON; // must set VMA bit before changing PTEs so page faults won't get confused
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). behavior: %lu, vma: 0x%p, prev: 0x%p, start: 0x%lx, end: 0x%lx\n", behavior, vma, prev, start, end);
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). vm_flags: 0x%lx, new_flags: 0x%lx, vma->vm_page_prot: 0x%lx\n", vma->vm_flags, new_flags, pgprot_val(vma->vm_page_prot));
 		// vm_flags are in include/linux/mm.h line 264 or so
 		// pgprot_t are kinda like the arch/riscv/include/asm/pgtable-bits.h ones but not exactly
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). vm_flags: 0x%lx, VM_READ: %lx, VM_WRITE: %lx, VM_EXEC: %lx, VM_SHARED: %lx, VM_SMOKEWAGON: %lx, VM_MAYREAD: %lx, VM_MAYWRITE: %lx, VM_MAYEXEC: %lx, VM_MAYSHARE: %lx\n", vma->vm_flags, vma->vm_flags & VM_READ, vma->vm_flags & VM_WRITE, vma->vm_flags & VM_EXEC, vma->vm_flags & VM_SHARED, vma->vm_flags & VM_SMOKEWAGON, vma->vm_flags & VM_MAYREAD, vma->vm_flags & VM_MAYWRITE, vma->vm_flags & VM_MAYEXEC, vma->vm_flags & VM_MAYSHARE);
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). vm_page_prot: 0x%lx, PAGE_READ: %lx, PAGE_WRITE: %lx, PAGE_EXEC: %lx\n", pgprot_val(vma->vm_page_prot), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_READ), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_WRITE), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_EXEC));
+		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(): behavior: %lu, vma: 0x%p, prev: 0x%p, start: 0x%lx, end: 0x%lx\n"
+						  "                                    vm_flags: 0x%lx, new_flags: 0x%lx, vma->vm_page_prot: 0x%lx\n"
+						  "                                    VM_READ: %lx, VM_WRITE: %lx, VM_EXEC: %lx, VM_SHARED: %lx, VM_SMOKEWAGON: %lx, VM_MAYREAD: %lx, VM_MAYWRITE: %lx, VM_MAYEXEC: %lx, VM_MAYSHARE: %lx\n"
+						  "                                    vm_page_prot: 0x%lx, PAGE_READ: %lx, PAGE_WRITE: %lx, PAGE_EXEC: %lx\n",
+			behavior, vma, prev, start, end,
+			vma->vm_flags, new_flags, pgprot_val(vma->vm_page_prot),
+			vma->vm_flags & VM_READ, vma->vm_flags & VM_WRITE, vma->vm_flags & VM_EXEC, vma->vm_flags & VM_SHARED, vma->vm_flags & VM_SMOKEWAGON, vma->vm_flags & VM_MAYREAD, vma->vm_flags & VM_MAYWRITE, vma->vm_flags & VM_MAYEXEC, vma->vm_flags & VM_MAYSHARE,
+			pgprot_val(vma->vm_page_prot), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_READ), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_WRITE), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_EXEC));
 		/*
 		 * If we haven't already, kvcalloc a LARGE array of cpumasks, one mask per page in virtual userspace.
 		 * Aspirational TODO: it would be nice to swap to cpumask storage that we could deallocate, such
@@ -1236,6 +1245,9 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 		//printk(KERN_ALERT "smokewagon: madvise_vma_behavior(). vma: %p, vm_flags: 0x%lx, new_flags: 0x%lx", vma, vma->vm_flags, new_flags);
 		error = madvise_desmokewagon(vma, prev, start, end);
 		break;
+	case MADV_PROBE_TLB:
+		scan_tlb(vma->vm_mm, start >> PAGE_SHIFT);
+		return probe_tlb(vma->vm_mm, start >> PAGE_SHIFT);
 	}
 
 	anon_name = anon_vma_name(vma);
@@ -1250,8 +1262,8 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 		if (error) {
 			// only error is allocation failure
 		}
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior()2 vm_flags: 0x%lx, VM_READ: %lx, VM_WRITE: %lx, VM_EXEC: %lx, VM_SHARED: %lx, VM_SMOKEWAGON: %lx, VM_MAYREAD: %lx, VM_MAYWRITE: %lx, VM_MAYEXEC: %lx, VM_MAYSHARE: %lx\n", vma->vm_flags, vma->vm_flags & VM_READ, vma->vm_flags & VM_WRITE, vma->vm_flags & VM_EXEC, vma->vm_flags & VM_SHARED, vma->vm_flags & VM_SMOKEWAGON, vma->vm_flags & VM_MAYREAD, vma->vm_flags & VM_MAYWRITE, vma->vm_flags & VM_MAYEXEC, vma->vm_flags & VM_MAYSHARE);
-		printk(KERN_ALERT "smokewagon: madvise_vma_behavior()2 vm_page_prot: 0x%lx, PAGE_READ: %lx, PAGE_WRITE: %lx, PAGE_EXEC: %lx\n", pgprot_val(vma->vm_page_prot), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_READ), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_WRITE), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_EXEC));
+		//printk(KERN_ALERT "smokewagon: madvise_vma_behavior()2 vm_flags: 0x%lx, VM_READ: %lx, VM_WRITE: %lx, VM_EXEC: %lx, VM_SHARED: %lx, VM_SMOKEWAGON: %lx, VM_MAYREAD: %lx, VM_MAYWRITE: %lx, VM_MAYEXEC: %lx, VM_MAYSHARE: %lx\n", vma->vm_flags, vma->vm_flags & VM_READ, vma->vm_flags & VM_WRITE, vma->vm_flags & VM_EXEC, vma->vm_flags & VM_SHARED, vma->vm_flags & VM_SMOKEWAGON, vma->vm_flags & VM_MAYREAD, vma->vm_flags & VM_MAYWRITE, vma->vm_flags & VM_MAYEXEC, vma->vm_flags & VM_MAYSHARE);
+		//printk(KERN_ALERT "smokewagon: madvise_vma_behavior()2 vm_page_prot: 0x%lx, PAGE_READ: %lx, PAGE_WRITE: %lx, PAGE_EXEC: %lx\n", pgprot_val(vma->vm_page_prot), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_READ), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_WRITE), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_EXEC));
 		break;
 	default:
 	}
@@ -1352,6 +1364,7 @@ madvise_behavior_valid(int behavior)
 #endif
 	case MADV_PRIVATE_TLB:
 	case MADV_NORMAL_TLB:
+	case MADV_PROBE_TLB:
 		return true;
 
 	default:

@@ -12,6 +12,10 @@ static void tlb_flush(struct mmu_gather *tlb);
 
 inline void smokewagon_load_tlb(struct vm_fault *vmf);
 
+inline unsigned long probe_tlb(struct mm_struct *mm, unsigned long vpn);
+
+inline unsigned long scan_tlb(struct mm_struct *mm, unsigned long vpn);
+
 static inline void printUL(unsigned long ul)
 {
 	printk(KERN_CONT "0b");
