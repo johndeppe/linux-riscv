@@ -1227,9 +1227,10 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 			vma->vm_flags & VM_READ, vma->vm_flags & VM_WRITE, vma->vm_flags & VM_EXEC, vma->vm_flags & VM_SHARED, vma->vm_flags & VM_SMOKEWAGON, vma->vm_flags & VM_MAYREAD, vma->vm_flags & VM_MAYWRITE, vma->vm_flags & VM_MAYEXEC, vma->vm_flags & VM_MAYSHARE,
 			pgprot_val(vma->vm_page_prot), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_READ), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_WRITE), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_EXEC));
 		/*
-		 * If we haven't already, kvcalloc a LARGE array of cpumasks, one mask per page in virtual userspace.
+		 * If we haven't already, kvcalloc a LARGE array of cpumasks, one mask per page in the mm's virtual userspace.
 		 * Aspirational TODO: it would be nice to swap to cpumask storage that we could deallocate, such
-		 * as smaller arrays attached to VMAs. However, VMA merging is a mess I want to avoid.
+		 * as smaller arrays attached to VMAs. However, VMA merging is a mess I want to avoid until I move to a later Linux
+		 * version that simplifies VMA merging, and we already have the whole mmap_lock anyway.
 		 */
 		if (!vma->vm_mm->context.smokewagon_masks) {
 			vma->vm_mm->context.smokewagon_masks = kvcalloc(TASK_SIZE >> PAGE_SHIFT, sizeof(cpumask_t), GFP_KERNEL);

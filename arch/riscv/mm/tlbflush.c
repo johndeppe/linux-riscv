@@ -99,8 +99,14 @@ static void __ipi_flush_tlb_range_asid(void *info)
 	local_flush_tlb_range_asid(d->start, d->size, d->stride, d->asid);
 }
 
-/*
+static inline unsigned long get_mm_asid(struct mm_struct *mm)
+{
+	return static_branch_unlikely(&use_asid_allocator) ?
+			atomic_long_read(&mm->context.id) & asid_mask : FLUSH_TLB_NO_ASID;
+}
+
 // Removes cores that don't need flushing from the cpumask
+// OR smokewagon cpumasks for all pages in range together to create filter
 static void smokewagon_filter_cpumask(struct cpumask *cmask, 
 			      struct mm_struct *mm,
 				  unsigned long start, unsigned long size,
@@ -108,28 +114,37 @@ static void smokewagon_filter_cpumask(struct cpumask *cmask,
 {
 	cpumask_t smokewagon_filter;
 	cpumask_clear(&smokewagon_filter);
-	struct vm_area_struct *vma;
+	struct vm_area_struct *vma = NULL;
 	char mask_buf[NR_CPUS+1];   // debug printk buffer
 	char filter_buf[NR_CPUS+1]; // debug printk buffer
 	unsigned long addr = start;
 	unsigned long end = start + size;
 
-	// OR smokewagon cpumasks for all pages in range together to create filter
 	while (addr < end) {
-		vma = lock_vma_under_rcu(mm, start);
-		while (addr < vma->vm_end) {
-			cpumask_or(&smokewagon_filter, &smokewagon_filter, &mm->context.smokewagon_masks[addr >> PAGE_SHIFT]);
-			addr += stride;
+		// read-lock vma (uhoh is this horrible here? I think it might be)
+		vma = lock_vma_under_rcu(mm, addr);
+		if (!vma) {
+			printk(KERN_ALERT "smokewagon: smokewagon_filter_cpumask() failed VMA lock. cpu: %2d, asid: %lx, vpn: %lx\n",
+				smp_processor_id(), get_mm_asid(mm), addr >> PAGE_SHIFT);
+			return;
 		}
 
-		
+		// iterate over pages in VMA
+		while (addr < vma->vm_end) {
+			// look up the smokewagon mask and logical-OR it into the filter
+			cpumask_or(&smokewagon_filter, &smokewagon_filter, &mm->context.smokewagon_masks[addr >> PAGE_SHIFT]);
+			for (size_t i=0; i<nr_cpu_ids;i++) {mask_buf[i] = cpumask_test_cpu(i,&mm->context.smokewagon_masks[addr >> PAGE_SHIFT]) ? '1' : '0';} mask_buf[nr_cpu_ids] = '\0';
+			for (size_t i=0; i<nr_cpu_ids;i++) {filter_buf[i] = cpumask_test_cpu(i,&smokewagon_filter) ? '1' : '0';} filter_buf[nr_cpu_ids] = '\0';
+			printk("smokewagon_filter_cpumask: cpu: %2d, asid: 0x%lx, vpn: 0x%lx, mask: %s\n"
+				   "                                                      total_filter: %s\n",
+				   smp_processor_id(), get_mm_asid(mm), addr >> PAGE_SHIFT, mask_buf,
+				   filter_buf);
+			addr += stride;
+		}
+		vma_end_read(vma);
 	}
-
-	// filter interrupt mask with cpumask_and();
-
-	// TODO clear smokewagon mask for everyone who got flushed, needs VMA synchronization
 }
-*/
+
 static void __flush_tlb_range(struct cpumask *cmask, unsigned long asid,
 			      unsigned long start, unsigned long size,
 			      unsigned long stride)
@@ -171,14 +186,21 @@ static void __flush_tlb_range(struct cpumask *cmask, unsigned long asid,
 		put_cpu();
 }
 
-static inline unsigned long get_mm_asid(struct mm_struct *mm)
-{
-	return static_branch_unlikely(&use_asid_allocator) ?
-			atomic_long_read(&mm->context.id) & asid_mask : FLUSH_TLB_NO_ASID;
-}
-
 void flush_tlb_mm(struct mm_struct *mm)
 {
+	// flush smokewagon masks if we have them
+	if (mm->context.mm_used_smokewagon) {
+		spin_lock(&mm->context.smokewagon_lock);
+		cpumask_t* old_masks = mm->context.smokewagon_masks;
+		if (old_masks) {
+			// we're flushing all tlbs, so just drop the old array and allocate a new blank one
+			cpumask_t *new_masks = kvcalloc(TASK_SIZE >> PAGE_SHIFT, sizeof(cpumask_t), GFP_KERNEL);
+			mm->context.smokewagon_masks = new_masks;
+			kfree(old_masks);
+		}
+		spin_unlock(&mm->context.smokewagon_lock);
+	}
+
 	__flush_tlb_range(mm_cpumask(mm), get_mm_asid(mm),
 			  0, FLUSH_TLB_MAX_SIZE, PAGE_SIZE);
 }
@@ -187,8 +209,42 @@ void flush_tlb_mm_range(struct mm_struct *mm,
 			unsigned long start, unsigned long end,
 			unsigned int page_size)
 {
-	/* use smokewagon */
-	__flush_tlb_range(mm_cpumask(mm), get_mm_asid(mm),
+	cpumask_t smokewagon_filter;
+	cpumask_t* flush_cpumask = mm_cpumask(mm);
+	if (mm->context.mm_used_smokewagon) {
+		char mask_buf[NR_CPUS+1];   // debug printk buffer
+		char filter_buf[NR_CPUS+1]; // debug printk buffer
+		cpumask_clear(&smokewagon_filter);
+		spin_lock(&mm->context.smokewagon_lock);
+		unsigned long addr = start;
+		while (addr < end) {
+			cpumask_or(&smokewagon_filter, &smokewagon_filter, &mm->context.smokewagon_masks[addr >> PAGE_SHIFT]);
+			// debug printks
+			for (size_t i=0; i<nr_cpu_ids;i++) {mask_buf[i] = cpumask_test_cpu(i,&mm->context.smokewagon_masks[addr >> PAGE_SHIFT]) ? '1' : '0';} mask_buf[nr_cpu_ids] = '\0';
+			for (size_t i=0; i<nr_cpu_ids;i++) {filter_buf[i] = cpumask_test_cpu(i,&smokewagon_filter) ? '1' : '0';} filter_buf[nr_cpu_ids] = '\0';
+			printk("smokewagon_filter_cpumask: cpu: %2d, asid: 0x%lx, vpn: 0x%lx, mask: %s\n"
+				   "                                                 smokewagon_filter: %s\n",
+				   smp_processor_id(), get_mm_asid(mm), addr >> PAGE_SHIFT, mask_buf,
+				   filter_buf);
+
+			cpumask_clear(&mm->context.smokewagon_masks[addr >> PAGE_SHIFT]);
+			addr += page_size;
+		}
+		spin_unlock(&mm->context.smokewagon_lock);
+
+		// debug: smokewagon filter should be a subset of the mm cpumask, or something is terribly wrong
+		if (!cpumask_subset(&smokewagon_filter, mm_cpumask(mm))) {
+			for (size_t i=0; i<nr_cpu_ids;i++) {mask_buf[i] = cpumask_test_cpu(i,&mm->context.smokewagon_masks[addr >> PAGE_SHIFT]) ? '1' : '0';} mask_buf[nr_cpu_ids] = '\0';
+			printk(KERN_ALERT "smokewagon_filter_cpumask: uhoh! filter is not a subset of mm_cpumask! cpu: %2d, asid: 0x%lx, vpn: 0x%lx\n"
+							  "                           filter:%s\n"
+							  "                       mm_cpumask:%s\n",
+							smp_processor_id(), get_mm_asid(mm), addr >> PAGE_SHIFT,
+							mask_buf,
+							filter_buf);
+		}
+		flush_cpumask = &smokewagon_filter;
+	}
+	__flush_tlb_range(flush_cpumask, get_mm_asid(mm),
 			  start, end - start, page_size);
 }
 
@@ -228,6 +284,9 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 		}
 	}
 	/* use smokewagon */
+	if(vma && vma->vm_flags & VM_SMOKEWAGON)
+		printk(KERN_ALERT "smokewagon: flush_tlb_range(): cpu %2d, mm: 0x%p, vma: 0x%p, start: 0x%lx, end: 0x%lx\n",
+			smp_processor_id(), vma->vm_mm, vma, start, end);
 	__flush_tlb_range(mm_cpumask(vma->vm_mm), get_mm_asid(vma->vm_mm),
 			  start, end - start, stride_size);
 }
@@ -434,17 +493,18 @@ inline void smokewagon_load_tlb(struct vm_fault *vmf)
 	unsigned long smcir = asid | SMCIR_TLBWR; // TLBWR overwrites a random entry
 
 	/* debug kprint
-	cpumask_t before = vmf->vma->vm_mm->context.smokewagon_masks[vpn];
+	cpumask_t before = vmf->vma->vm_mm->smokewagon_masks[vpn];
 	char before_buf[NR_CPUS+1];
 	for (size_t i=0; i<nr_cpu_ids;i++) {before_buf[i] = cpumask_test_cpu(i,&before) ? '1' : '0';}
 	before_buf[nr_cpu_ids] = '\0';
 	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb() cpu: %2d, vpn: 0x%lx,  before: %s\n", smp_processor_id(), vpn, before_buf);
 	*/
 
+	/* set cpu's bit in page's smokewagon mask */
 	cpumask_set_cpu(smp_processor_id(), &vmf->vma->vm_mm->context.smokewagon_masks[vpn]);
 
 	/* debug kprint
-	cpumask_t after = vmf->vma->vm_mm->context.smokewagon_masks[vpn];
+	cpumask_t after = vmf->vma->vm_mm->smokewagon_masks[vpn];
 	char after_buf[NR_CPUS+1];
 	for (size_t i=0; i<nr_cpu_ids;i++) {after_buf[i] = cpumask_test_cpu(i,&after) ? '1' : '0';}
 	after_buf[nr_cpu_ids] = '\0';
