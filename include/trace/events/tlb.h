@@ -56,6 +56,30 @@ TRACE_EVENT(tlb_flush,
 		__entry->reason)
 );
 
+TRACE_EVENT(tlb_smokewagon_flush,
+
+	TP_PROTO(int reason, unsigned long pages, const struct cpumask *mask),
+	TP_ARGS(reason, pages, mask),
+
+	TP_STRUCT__entry(
+		__field(          int, reason)
+		__field(unsigned long, pages)
+		__field( unsigned int, harts)
+	),
+
+	TP_fast_assign(
+		__entry->reason = reason;
+		__entry->pages  = pages;
+		__entry->harts  = cpumask_weight(mask);
+	),
+
+	TP_printk("pages:%lu, harts:%u, reason:%s (%d)",
+		__entry->pages,
+		__entry->harts,
+		__print_symbolic(__entry->reason, TLB_FLUSH_REASON),
+		__entry->reason)
+);
+
 #endif /* _TRACE_TLB_H */
 
 /* This part must be outside protection */

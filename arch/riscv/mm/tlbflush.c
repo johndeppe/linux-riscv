@@ -6,6 +6,7 @@
 #include <linux/hugetlb.h>
 #include <asm/sbi.h>
 #include <asm/mmu_context.h>
+#include <trace/events/tlb.h>
 
 static inline void local_flush_tlb_all_asid(unsigned long asid)
 {
@@ -105,52 +106,13 @@ static inline unsigned long get_mm_asid(struct mm_struct *mm)
 			atomic_long_read(&mm->context.id) & asid_mask : FLUSH_TLB_NO_ASID;
 }
 
-// Removes cores that don't need flushing from the cpumask
-// OR smokewagon cpumasks for all pages in range together to create filter
-static void smokewagon_filter_cpumask(struct cpumask *cmask, 
-			      struct mm_struct *mm,
-				  unsigned long start, unsigned long size,
-				  unsigned long stride)
-{
-	cpumask_t smokewagon_filter;
-	cpumask_clear(&smokewagon_filter);
-	struct vm_area_struct *vma = NULL;
-	char mask_buf[NR_CPUS+1];   // debug printk buffer
-	char filter_buf[NR_CPUS+1]; // debug printk buffer
-	unsigned long addr = start;
-	unsigned long end = start + size;
-
-	while (addr < end) {
-		// read-lock vma (uhoh is this horrible here? I think it might be)
-		vma = lock_vma_under_rcu(mm, addr);
-		if (!vma) {
-			printk(KERN_ALERT "smokewagon: smokewagon_filter_cpumask() failed VMA lock. cpu: %2d, asid: %lx, vpn: %lx\n",
-				smp_processor_id(), get_mm_asid(mm), addr >> PAGE_SHIFT);
-			return;
-		}
-
-		// iterate over pages in VMA
-		while (addr < vma->vm_end) {
-			// look up the smokewagon mask and logical-OR it into the filter
-			cpumask_or(&smokewagon_filter, &smokewagon_filter, &mm->context.smokewagon_masks[addr >> PAGE_SHIFT]);
-			for (size_t i=0; i<nr_cpu_ids;i++) {mask_buf[i] = cpumask_test_cpu(i,&mm->context.smokewagon_masks[addr >> PAGE_SHIFT]) ? '1' : '0';} mask_buf[nr_cpu_ids] = '\0';
-			for (size_t i=0; i<nr_cpu_ids;i++) {filter_buf[i] = cpumask_test_cpu(i,&smokewagon_filter) ? '1' : '0';} filter_buf[nr_cpu_ids] = '\0';
-			printk("smokewagon_filter_cpumask: cpu: %2d, asid: 0x%lx, vpn: 0x%lx, mask: %s\n"
-				   "                                                      total_filter: %s\n",
-				   smp_processor_id(), get_mm_asid(mm), addr >> PAGE_SHIFT, mask_buf,
-				   filter_buf);
-			addr += stride;
-		}
-		vma_end_read(vma);
-	}
-}
-
 static void __flush_tlb_range(struct cpumask *cmask, unsigned long asid,
 			      unsigned long start, unsigned long size,
 			      unsigned long stride)
 {
 	struct flush_tlb_range_data ftd;
 	bool broadcast;
+	enum tlb_flush_reason reason;
 
 	if (cpumask_empty(cmask))
 		return;
@@ -178,9 +140,12 @@ static void __flush_tlb_range(struct cpumask *cmask, unsigned long asid,
 			sbi_remote_sfence_vma_asid(cmask,
 						   start, size, asid);
 		}
+		reason = TLB_REMOTE_SEND_IPI;
 	} else {
 		local_flush_tlb_range_asid(start, size, stride, asid);
+		reason = TLB_LOCAL_SHOOTDOWN;
 	}
+	trace_tlb_smokewagon_flush(reason, DIV_ROUND_UP(size, stride), cmask);
 
 	if (cmask != cpu_online_mask)
 		put_cpu();
@@ -480,6 +445,7 @@ inline void smokewagon_load_tlb(struct vm_fault *vmf)
 	pte_t smel = pfn_pte(pfn, prot);
 	if (vmf->vma->vm_flags & VM_WRITE)
 		smel = pte_mkwrite(pte_mkdirty(smel), vmf->vma);
+		/* debug printk
 	printk(KERN_ALERT "smokewagon_load_tlb(): cpu: %2d, pte: 0x%lx, orig_pte: 0x%lx\n"
 					  "                       smeh: 0x%lx, asid: 0x%lx, vpn: 0x%lx, addr: 0x%lx\n"
 					  "                       smel: 0x%lx, pfn: 0x%lx, V: %lx, R: %lx, W: %lx, X: %lx, U: %lx, G: %lx, A: %lx, D: %lx\n"
@@ -488,6 +454,7 @@ inline void smokewagon_load_tlb(struct vm_fault *vmf)
 		smeh, asid, vpn, vmf->address,
 		smel.pte, pfn, smel.pte & _PAGE_PRESENT, smel.pte & _PAGE_READ, smel.pte & _PAGE_WRITE, smel.pte & _PAGE_EXEC, smel.pte & _PAGE_USER, smel.pte & _PAGE_GLOBAL, smel.pte & _PAGE_ACCESSED, smel.pte & _PAGE_DIRTY,
 		vmf->vma->vm_flags, vmf->vma->vm_flags & VM_READ, vmf->vma->vm_flags & VM_WRITE, vmf->vma->vm_flags & VM_EXEC, vmf->vma->vm_flags & VM_SHARED, vmf->vma->vm_flags & VM_SMOKEWAGON, vmf->vma->vm_flags & VM_MAYREAD, vmf->vma->vm_flags & VM_MAYWRITE, vmf->vma->vm_flags & VM_MAYEXEC, vmf->vma->vm_flags & VM_MAYSHARE);
+		*/
 
 	/* construct smcir */
 	unsigned long smcir = asid | SMCIR_TLBWR; // TLBWR overwrites a random entry
