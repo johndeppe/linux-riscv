@@ -1598,6 +1598,16 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 		if (need_resched())
 			break;
 
+		/* Smokewagon's non-present-but-actually-present PTEs break many
+		 * assumptions inside the zap logic. We already have the pte lock, so
+		 * I'll just quickly put back a regular pte instead of hacking
+		 * everything in folio-zapping land.
+		 */
+		if (vma && vma->vm_flags & VM_SMOKEWAGON && is_smokewagon_entry(pte_to_swp_entry(ptent))) {
+			ptent = pfn_pte(swp_offset_pfn(pte_to_swp_entry(ptent)), vm_get_page_prot(vma->vm_flags));
+			set_pte_at(mm, addr, pte, ptent);
+		}
+
 		if (pte_present(ptent)) {
 			max_nr = (end - addr) / PAGE_SIZE;
 			nr = zap_present_ptes(tlb, vma, pte, ptent, max_nr,
