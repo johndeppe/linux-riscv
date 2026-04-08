@@ -1137,6 +1137,27 @@ static long madvise_remove(struct vm_area_struct *vma,
 }
 
 /*
+ * If we haven't already, kvcalloc a LARGE array of cpumasks, one mask per page
+ * in the mm's virtual userspace.
+ *
+ * Aspirational TODO: it would be nice to swap to cpumask storage that we could
+ * deallocate, such as smaller arrays attached to VMAs. However, VMA merging is
+ * a mess I want to avoid until I move to a later Linux version that simplifies
+ * VMA merging, and we already have the whole mmap_lock anyway.
+ */
+inline int allocate_smokewagon_masks_if_none(struct mm_struct *mm) {
+	if (!mm->context.smokewagon_masks) {
+		// FIXME should probably take context.smokewagon_lock here and recheck under lock?
+		mm->context.smokewagon_masks = kvcalloc(TASK_SIZE >> PAGE_SHIFT, sizeof(cpumask_t), GFP_KERNEL);
+		if (!mm->context.smokewagon_masks) {
+			printk(KERN_ALERT "smokewagon: madvise_smokewagon(). kvcalloc failed.");
+			return -ENOMEM;
+		}
+	}
+	return 0;
+}
+
+/*
  * Apply an madvise behavior to a region of a vma.  madvise_update_vma
  * will handle splitting a vm area into separate areas, each area with its own
  * behavior.
@@ -1226,19 +1247,8 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 			vma->vm_flags, new_flags, pgprot_val(vma->vm_page_prot),
 			vma->vm_flags & VM_READ, vma->vm_flags & VM_WRITE, vma->vm_flags & VM_EXEC, vma->vm_flags & VM_SHARED, vma->vm_flags & VM_SMOKEWAGON, vma->vm_flags & VM_MAYREAD, vma->vm_flags & VM_MAYWRITE, vma->vm_flags & VM_MAYEXEC, vma->vm_flags & VM_MAYSHARE,
 			pgprot_val(vma->vm_page_prot), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_READ), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_WRITE), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_EXEC));
-		/*
-		 * If we haven't already, kvcalloc a LARGE array of cpumasks, one mask per page in the mm's virtual userspace.
-		 * Aspirational TODO: it would be nice to swap to cpumask storage that we could deallocate, such
-		 * as smaller arrays attached to VMAs. However, VMA merging is a mess I want to avoid until I move to a later Linux
-		 * version that simplifies VMA merging, and we already have the whole mmap_lock anyway.
-		 */
-		if (!vma->vm_mm->context.smokewagon_masks) {
-			vma->vm_mm->context.smokewagon_masks = kvcalloc(TASK_SIZE >> PAGE_SHIFT, sizeof(cpumask_t), GFP_KERNEL);
-			if (!vma->vm_mm->context.smokewagon_masks) {
-				printk(KERN_ALERT "smokewagon: madvise_smokewagon(). kvcalloc failed.");
-				return -ENOMEM;
-			}
-		}
+		error = allocate_smokewagon_masks_if_none(vma->vm_mm);
+		if (error) return error;
 		break;
 	case MADV_NORMAL_TLB:
 		new_flags &= ~VM_SMOKEWAGON;

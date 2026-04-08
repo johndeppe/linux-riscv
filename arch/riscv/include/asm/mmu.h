@@ -21,7 +21,7 @@ typedef struct {
 	cpumask_t icache_stale_mask;
 #endif
 	bool mm_used_smokewagon; /* true if this process has ever used smokewagon */
-	spinlock_t smokewagon_lock; /* protects smokewagon_masks */
+	spinlock_t smokewagon_lock; /* protects smokewagon_masks pointer */
 	cpumask_t * smokewagon_masks; /* indexed by vpn (virtual page number) */
 #ifdef CONFIG_BINFMT_ELF_FDPIC
 	unsigned long exec_fdpic_loadmap;

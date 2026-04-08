@@ -3258,6 +3258,8 @@ vm_fault_t filemap_fault(struct vm_fault *vmf)
 	vm_fault_t ret = 0;
 	bool mapping_locked = false;
 
+	if (vmf->vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: filemap_fault(): cpu: %2d\n", smp_processor_id());
+
 	max_idx = DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE);
 	if (unlikely(index >= max_idx))
 		return VM_FAULT_SIGBUS;
@@ -3578,6 +3580,7 @@ vm_fault_t filemap_map_pages(struct vm_fault *vmf,
 	if (!folio)
 		goto out;
 
+	/* likely needs update for smokewagon to support PMDs */
 	if (filemap_map_pmd(vmf, folio, start_pgoff)) {
 		ret = VM_FAULT_NOPAGE;
 		goto out;
