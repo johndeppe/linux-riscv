@@ -4752,7 +4752,7 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 		if (nr > 1) {
 			printk(KERN_ALERT "smokewagon: maybe bug? nr: %d, did entries for nr > 1 form properly?\n", nr);
 		}
-		allocate_smokewagon_masks_if_none(vma->vm_mm);
+		allocate_smokewagon_masks_if_none(vma->vm_mm); // FIXME kvcalloc can fail but we have no recovery path here.
 		set_smokewagon_ptes(vma->vm_mm, addr, vmf->pte, entry, nr);
 	} else {
 		set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr);

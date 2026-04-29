@@ -161,7 +161,7 @@ void flush_tlb_mm(struct mm_struct *mm)
 			// we're flushing all tlbs, so just drop the old array and allocate a new blank one
 			cpumask_t *new_masks = kvcalloc(TASK_SIZE >> PAGE_SHIFT, sizeof(cpumask_t), GFP_KERNEL);
 			mm->context.smokewagon_masks = new_masks;
-			kfree(old_masks);
+			kvfree(old_masks);
 		}
 		spin_unlock(&mm->context.smokewagon_lock);
 	}
@@ -187,7 +187,8 @@ void flush_tlb_mm_range(struct mm_struct *mm,
 			// debug printks
 			for (size_t i=0; i<nr_cpu_ids;i++) {mask_buf[i] = cpumask_test_cpu(i,&mm->context.smokewagon_masks[addr >> PAGE_SHIFT]) ? '1' : '0';} mask_buf[nr_cpu_ids] = '\0';
 			for (size_t i=0; i<nr_cpu_ids;i++) {filter_buf[i] = cpumask_test_cpu(i,&smokewagon_filter) ? '1' : '0';} filter_buf[nr_cpu_ids] = '\0';
-			printk("smokewagon_filter_cpumask: cpu: %2d, asid: 0x%lx, vpn: 0x%lx, mask: %s\n"
+			printk("smokewagon_filter_cpumask: cpu: %2d, asid: 0x%lx, vpn: 0x%lx\n"
+				   "                                                              mask: %s\n"
 				   "                                                 smokewagon_filter: %s\n",
 				   smp_processor_id(), get_mm_asid(mm), addr >> PAGE_SHIFT, mask_buf,
 				   filter_buf);
@@ -450,11 +451,13 @@ inline void smokewagon_load_tlb(struct vm_fault *vmf)
 	printk(KERN_ALERT "smokewagon_load_tlb(): cpu: %2d, pte: 0x%lx, orig_pte: 0x%lx\n"
 					  "                       smeh: 0x%lx, asid: 0x%lx, vpn: 0x%lx, addr: 0x%lx\n"
 					  "                       smel: 0x%lx, pfn: 0x%lx, V: %lx, R: %lx, W: %lx, X: %lx, U: %lx, G: %lx, A: %lx, D: %lx\n"
-					  "                       vm_flags: 0x%lx, VM_READ: %lx, VM_WRITE: %lx, VM_EXEC: %lx, VM_SHARED: %lx, VM_SMOKEWAGON: %lx, VM_MAYREAD: %lx, VM_MAYWRITE: %lx, VM_MAYEXEC: %lx, VM_MAYSHARE: %lx\n",
+					  "                       vm_flags: 0x%lx, VM_READ: %lx, VM_WRITE: %lx, VM_EXEC: %lx, VM_SHARED: %lx\n"
+					  "                       VM_SMOKEWAGON: %lx, VM_MAYREAD: %lx, VM_MAYWRITE: %lx, VM_MAYEXEC: %lx, VM_MAYSHARE: %lx\n",
 		smp_processor_id(), pte_val(ptep_get(vmf->pte)), pte_val(vmf->orig_pte),
 		smeh, asid, vpn, vmf->address,
 		smel.pte, pfn, smel.pte & _PAGE_PRESENT, smel.pte & _PAGE_READ, smel.pte & _PAGE_WRITE, smel.pte & _PAGE_EXEC, smel.pte & _PAGE_USER, smel.pte & _PAGE_GLOBAL, smel.pte & _PAGE_ACCESSED, smel.pte & _PAGE_DIRTY,
-		vmf->vma->vm_flags, vmf->vma->vm_flags & VM_READ, vmf->vma->vm_flags & VM_WRITE, vmf->vma->vm_flags & VM_EXEC, vmf->vma->vm_flags & VM_SHARED, vmf->vma->vm_flags & VM_SMOKEWAGON, vmf->vma->vm_flags & VM_MAYREAD, vmf->vma->vm_flags & VM_MAYWRITE, vmf->vma->vm_flags & VM_MAYEXEC, vmf->vma->vm_flags & VM_MAYSHARE);
+		vmf->vma->vm_flags, vmf->vma->vm_flags & VM_READ, vmf->vma->vm_flags & VM_WRITE, vmf->vma->vm_flags & VM_EXEC, vmf->vma->vm_flags & VM_SHARED,
+		vmf->vma->vm_flags & VM_SMOKEWAGON,vmf->vma->vm_flags & VM_MAYREAD, vmf->vma->vm_flags & VM_MAYWRITE, vmf->vma->vm_flags & VM_MAYEXEC, vmf->vma->vm_flags & VM_MAYSHARE);
 
 	/* construct smcir */
 	unsigned long smcir = asid | SMCIR_TLBWR; // TLBWR overwrites a random entry
@@ -464,7 +467,7 @@ inline void smokewagon_load_tlb(struct vm_fault *vmf)
 	char before_buf[NR_CPUS+1];
 	for (size_t i=0; i<nr_cpu_ids;i++) {before_buf[i] = cpumask_test_cpu(i,&before) ? '1' : '0';}
 	before_buf[nr_cpu_ids] = '\0';
-	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb() cpu: %2d, vpn: 0x%lx,  before: %s\n", smp_processor_id(), vpn, before_buf);
+	printk("smokewagon: smokewagon_load_tlb(): cpu: %2d, vpn: 0x%lx, before: %s\n", smp_processor_id(), vpn, before_buf);
 
 	/* set cpu's bit in page's smokewagon mask */
 	cpumask_set_cpu(smp_processor_id(), &vmf->vma->vm_mm->context.smokewagon_masks[vpn]);
@@ -474,11 +477,11 @@ inline void smokewagon_load_tlb(struct vm_fault *vmf)
 	char after_buf[NR_CPUS+1];
 	for (size_t i=0; i<nr_cpu_ids;i++) {after_buf[i] = cpumask_test_cpu(i,&after) ? '1' : '0';}
 	after_buf[nr_cpu_ids] = '\0';
-	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb() cpu: %2d, vpn: 0x%lx,   after: %s\n", smp_processor_id(), vpn, after_buf);
+	printk("smokewagon: smokewagon_load_tlb(): cpu: %2d, vpn: 0x%lx,  after: %s\n", smp_processor_id(), vpn, after_buf);
 
 	csr_write(CSR_SMEH, smeh);
 	csr_write(CSR_SMEL, smel.pte);
 	csr_write(CSR_SMCIR, smcir);
-	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb(): cpu: %2d, asid: 0x%lx, vpn: 0x%lx, smir_after: 0x%lx, smcir_after: 0x%lx\n", smp_processor_id(), asid, vpn, csr_read(CSR_SMIR), csr_read(CSR_SMCIR));
-	probe_tlb(vmf->vma->vm_mm, vpn);
+	//printk(KERN_ALERT "smokewagon: smokewagon_load_tlb(): cpu: %2d, asid: 0x%lx, vpn: 0x%lx, smir_after: 0x%lx, smcir_after: 0x%lx\n", smp_processor_id(), asid, vpn, csr_read(CSR_SMIR), csr_read(CSR_SMCIR));
+	//probe_tlb(vmf->vma->vm_mm, vpn);
 }

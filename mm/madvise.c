@@ -1146,15 +1146,18 @@ static long madvise_remove(struct vm_area_struct *vma,
  * VMA merging, and we already have the whole mmap_lock anyway.
  */
 inline int allocate_smokewagon_masks_if_none(struct mm_struct *mm) {
+	int error = 0;
 	if (!mm->context.smokewagon_masks) {
-		// FIXME should probably take context.smokewagon_lock here and recheck under lock?
+		mm->context.mm_used_smokewagon = true;
+		spin_lock(&mm->context.smokewagon_lock);
 		mm->context.smokewagon_masks = kvcalloc(TASK_SIZE >> PAGE_SHIFT, sizeof(cpumask_t), GFP_KERNEL);
 		if (!mm->context.smokewagon_masks) {
-			printk(KERN_ALERT "smokewagon: madvise_smokewagon(). kvcalloc failed.");
-			return -ENOMEM;
+			WARN(true, "smokewagon: madvise_smokewagon(). kvcalloc failed.");
+			error = -ENOMEM;
 		}
+		spin_unlock(&mm->context.smokewagon_lock);
 	}
-	return 0;
+	return error;
 }
 
 /*
@@ -1241,14 +1244,17 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 		// pgprot_t are kinda like the arch/riscv/include/asm/pgtable-bits.h ones but not exactly
 		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(): behavior: %lu, vma: 0x%p, prev: 0x%p, start: 0x%lx, end: 0x%lx\n"
 						  "                                    vm_flags: 0x%lx, new_flags: 0x%lx, vma->vm_page_prot: 0x%lx\n"
-						  "                                    VM_READ: %lx, VM_WRITE: %lx, VM_EXEC: %lx, VM_SHARED: %lx, VM_SMOKEWAGON: %lx, VM_MAYREAD: %lx, VM_MAYWRITE: %lx, VM_MAYEXEC: %lx, VM_MAYSHARE: %lx\n"
+						  "                                    VM_READ: %lx, VM_WRITE: %lx, VM_EXEC: %lx, VM_SHARED: %lx\n"
+						  "                                    VM_SMOKEWAGON: %lx, VM_MAYREAD: %lx, VM_MAYWRITE: %lx, VM_MAYEXEC: %lx, VM_MAYSHARE: %lx\n"
 						  "                                    vm_page_prot: 0x%lx, PAGE_READ: %lx, PAGE_WRITE: %lx, PAGE_EXEC: %lx\n",
 			behavior, vma, prev, start, end,
 			vma->vm_flags, new_flags, pgprot_val(vma->vm_page_prot),
-			vma->vm_flags & VM_READ, vma->vm_flags & VM_WRITE, vma->vm_flags & VM_EXEC, vma->vm_flags & VM_SHARED, vma->vm_flags & VM_SMOKEWAGON, vma->vm_flags & VM_MAYREAD, vma->vm_flags & VM_MAYWRITE, vma->vm_flags & VM_MAYEXEC, vma->vm_flags & VM_MAYSHARE,
+			vma->vm_flags & VM_READ, vma->vm_flags & VM_WRITE, vma->vm_flags & VM_EXEC, vma->vm_flags & VM_SHARED,
+			vma->vm_flags & VM_SMOKEWAGON, vma->vm_flags & VM_MAYREAD, vma->vm_flags & VM_MAYWRITE, vma->vm_flags & VM_MAYEXEC, vma->vm_flags & VM_MAYSHARE,
 			pgprot_val(vma->vm_page_prot), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_READ), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_WRITE), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_EXEC));
 		error = allocate_smokewagon_masks_if_none(vma->vm_mm);
-		if (error) return error;
+		if (error)
+			goto out;
 		break;
 	case MADV_NORMAL_TLB:
 		new_flags &= ~VM_SMOKEWAGON;
