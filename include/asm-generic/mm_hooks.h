@@ -15,11 +15,9 @@ static inline int arch_dup_mmap(struct mm_struct *oldmm,
 
 static inline void arch_exit_mmap(struct mm_struct *mm)
 {
-	if (mm->context.mm_used_smokewagon) {
-		spin_lock(&mm->context.smokewagon_lock);
-		if (mm->context.smokewagon_masks)
-			kvfree(mm->context.smokewagon_masks);
-		spin_unlock(&mm->context.smokewagon_lock);
+	if (mm->context.smokewagon_masks) {
+		mm->context.smokewagon_masks = NULL;
+		kvfree(mm->context.smokewagon_masks);
 	}
 }
 

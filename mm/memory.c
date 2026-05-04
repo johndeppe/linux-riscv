@@ -4514,7 +4514,7 @@ setpte:
 			swp_offset_pfn(swp_entry), swp_entry.val, entry.pte, pgprot_val(vma->vm_page_prot),
 			vma->vm_flags, vma->vm_flags & VM_READ, vma->vm_flags & VM_WRITE, vma->vm_flags & VM_EXEC, vma->vm_flags & VM_SHARED, vma->vm_flags & VM_SMOKEWAGON, vma->vm_flags & VM_MAYREAD, vma->vm_flags & VM_MAYWRITE, vma->vm_flags & VM_MAYEXEC, vma->vm_flags & VM_MAYSHARE,
 			pgprot_val(vma->vm_page_prot), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_READ), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_WRITE), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_EXEC));
-		//smokewagon_load_tlb(vmf);
+		//smokewagon_load_tlb(vmf); // optimization: since we're just going to re-fault here, why not just load TLB now?
 		if (nr_pages > 1) {
 			printk(KERN_ALERT "smokewagon: maybe bug? nr_pages: %d, did entries for nr_pages > 1 form properly?\n", nr_pages);
 		}
@@ -4691,15 +4691,15 @@ static inline void set_smokewagon_ptes(struct mm_struct *mm, unsigned long addr,
 
 	for (;;) {
 		pte_t smokewagon_pte = swp_entry_to_pte(make_smokewagon_entry(pte_pfn(pteval)));
-		 printk(KERN_ALERT "smokewagon: set_smokewagon_ptes(): old_pte: 0x%lx, old_pfn: 0x%lx\n"
+		printk(KERN_ALERT "smokewagon: set_smokewagon_ptes(): old_pte: 0x%lx, old_pfn: 0x%lx\n"
 						  "                                   addr: 0x%lx\n"
 						  "                                   smokewagon_entry: 0x%lx, smokewagon_pfn: 0x%lx, smokewagon_pte: 0x%lx\n",
 				pte_val(pteval), pte_pfn(pteval),
 				addr,
 				make_smokewagon_entry(pte_pfn(pteval)).val, swp_offset_pfn(make_smokewagon_entry(pte_pfn(pteval))), pte_val(smokewagon_pte)
 				);
+		cpumask_setall(&mm->context.smokewagon_masks[addr >> PAGE_SHIFT]);
 		__set_pte_at(mm, ptep, smokewagon_pte);
-		printk(KERN_ALERT "smokewagon: set_smokewagon_ptes(): PTE set\n");
 		// TODO could preinsert TLB entry here?
 		if (--nr == 0)
 			break;

@@ -73,7 +73,7 @@ static int madvise_need_mmap_write(int behavior)
 /*
  * smokewagonify_ptes - pagewalk pmd_entry callback
  *
- * Change regular ptes to smokewagon ptes. Patterned after clear_refs_pte_range()
+ * Change regular ptes to smokewagon ptes and set masks accordingly.
  * TODO: support hugepages
  */
 static int smokewagonify_ptes(pmd_t *pmd, unsigned long addr,
@@ -94,12 +94,14 @@ static int smokewagonify_ptes(pmd_t *pmd, unsigned long addr,
 
 		// TODO think harder about what kinds of PTEs we can encounter and check for them: swap, "special", others?
 		if (!pte_present(pte)) {
+			cpumask_setall(&masks[addr >> PAGE_SHIFT]);
 			printk(KERN_ALERT "smokewagon: smokewagonify_ptes(): cpu: %2d, skipping vpn: 0x%lx, pte: 0x%lx\n", smp_processor_id(), addr >> PAGE_SHIFT, pte.pte);
 			continue;
 		}
 
 		swp_entry_t smokewagon_entry = make_smokewagon_entry(pte_pfn(pte));
-		cpumask_copy(&masks[addr >> PAGE_SHIFT], mm_cpumask(walk->mm));
+		// clear smokewagon bits mean don't filter this CPU from shootdown, set smokewagon bits mean do filter this CPU from shootdown
+		bitmap_complement(cpumask_bits(&masks[addr >> PAGE_SHIFT]), cpumask_bits(mm_cpumask(walk->mm)), small_cpumask_bits);
 		set_pte_at(walk->mm, addr, ptep, swp_entry_to_pte(smokewagon_entry));
 
 		char debug_buf[NR_CPUS+1];
@@ -1148,14 +1150,11 @@ static long madvise_remove(struct vm_area_struct *vma,
 inline int allocate_smokewagon_masks_if_none(struct mm_struct *mm) {
 	int error = 0;
 	if (!mm->context.smokewagon_masks) {
-		mm->context.mm_used_smokewagon = true;
-		spin_lock(&mm->context.smokewagon_lock);
 		mm->context.smokewagon_masks = kvcalloc(TASK_SIZE >> PAGE_SHIFT, sizeof(cpumask_t), GFP_KERNEL);
 		if (!mm->context.smokewagon_masks) {
-			WARN(true, "smokewagon: madvise_smokewagon(). kvcalloc failed.");
+			WARN(true, "smokewagon: kvcalloc of smokewagon_masks failed.");
 			error = -ENOMEM;
 		}
-		spin_unlock(&mm->context.smokewagon_lock);
 	}
 	return error;
 }
