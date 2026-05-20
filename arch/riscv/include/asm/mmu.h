@@ -20,7 +20,8 @@ typedef struct {
 	/* A local icache flush is needed before user execution can resume. */
 	cpumask_t icache_stale_mask;
 #endif
-	cpumask_t * smokewagon_masks; /* indexed by vpn (virtual page number) */
+	spinlock_t smokewagon_lock;  /* protects publishing smokewagon_masks */
+	cpumask_t* smokewagon_masks; /* indexed by vpn (virtual page number) */
 #ifdef CONFIG_BINFMT_ELF_FDPIC
 	unsigned long exec_fdpic_loadmap;
 	unsigned long interp_fdpic_loadmap;

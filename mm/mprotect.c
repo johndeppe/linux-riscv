@@ -193,7 +193,7 @@ static long change_pte_range(struct mmu_gather *tlb,
 			if (pte_needs_flush(oldpte, ptent))
 				tlb_flush_pte_range(tlb, addr, PAGE_SIZE);
 			pages++;
-		} else if (is_swap_pte(oldpte)) {
+		} else if (is_swap_pte(oldpte)) { // FIXME: check that smokewagon behaves appropriately here
 			swp_entry_t entry = pte_to_swp_entry(oldpte);
 			pte_t newpte;
 

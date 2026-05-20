@@ -16,8 +16,10 @@ static inline int arch_dup_mmap(struct mm_struct *oldmm,
 static inline void arch_exit_mmap(struct mm_struct *mm)
 {
 	if (mm->context.smokewagon_masks) {
+		cpumask_t * old = mm->context.smokewagon_masks;
 		mm->context.smokewagon_masks = NULL;
-		kvfree(mm->context.smokewagon_masks);
+		kvfree(old);
+		// printk(KERN_ALERT "smokewagon: freed smokewagon masks\n");
 	}
 }
 

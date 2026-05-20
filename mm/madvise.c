@@ -100,7 +100,9 @@ static int smokewagonify_ptes(pmd_t *pmd, unsigned long addr,
 		}
 
 		swp_entry_t smokewagon_entry = make_smokewagon_entry(pte_pfn(pte));
-		// clear smokewagon bits mean don't filter this CPU from shootdown, set smokewagon bits mean do filter this CPU from shootdown
+		// clear (0) smokewagon mask bit means DO interrupt this cpu at shootdown, TLB is dirty
+		//   set (1) smokewagon mask bit means DO NOT interrupt this cpu at shootdown, TLB is clean
+		// accordingly, set the page's smokewagon mask to the complement of mm_cpumask
 		bitmap_complement(cpumask_bits(&masks[addr >> PAGE_SHIFT]), cpumask_bits(mm_cpumask(walk->mm)), small_cpumask_bits);
 		set_pte_at(walk->mm, addr, ptep, swp_entry_to_pte(smokewagon_entry));
 
@@ -160,13 +162,13 @@ static int desmokewagonify_ptes(pmd_t *pmd, unsigned long addr,
 	ptep = pte_offset_map_lock(walk->mm, pmd, addr, &ptl);
 	if (!ptep) {
 		walk->action = ACTION_AGAIN;
-		printk(KERN_ALERT "smokewagon: desmokewagonify_ptes(): cpu: %2d, retrying vpn: 0x%lx\n", smp_processor_id(), addr >> PAGE_SHIFT);
+		// printk(KERN_ALERT "smokewagon: desmokewagonify_ptes(): cpu: %2d, retrying vpn: 0x%lx\n", smp_processor_id(), addr >> PAGE_SHIFT);
 		return 0;
 	}
 	for (; addr != end; ptep++, addr += PAGE_SIZE) {
 		pte = ptep_get(ptep);
 		swp = pte_to_swp_entry(pte);
-		printk(KERN_ALERT "smokewagon: desmokewagonify_ptes(): cpu: %2d, vpn: 0x%lx, pte: 0x%lx, pfn: 0x%lx\n", smp_processor_id(), addr >> PAGE_SHIFT, pte.pte, pte_pfn(pte));
+		//printk(KERN_ALERT "smokewagon: desmokewagonify_ptes(): cpu: %2d, vpn: 0x%lx, pte: 0x%lx, pfn: 0x%lx\n", smp_processor_id(), addr >> PAGE_SHIFT, pte.pte, pte_pfn(pte));
 		if (is_smokewagon_entry(swp)) {
 			pte_t new_pte = pfn_pte(swp_offset_pfn(swp), vm_get_page_prot(walk->vma->vm_flags));
 			//printk(KERN_ALERT "smokewagon: desmokewagonify_ptes(): swp: 0x%lx, swp_pfn: 0x%lx, new_pte: 0x%lx, new_pfn: 0x%lx\n", swp.val, swp_offset_pfn(swp), new_pte.pte, pte_pfn(new_pte));
@@ -192,9 +194,9 @@ static long madvise_desmokewagon(struct vm_area_struct *vma,
 			struct vm_area_struct **prev,
 			unsigned long start_addr, unsigned long end_addr)
 {
-	long unsigned num_pages = (end_addr - start_addr) >> PAGE_SHIFT;
+	/* long unsigned num_pages = (end_addr - start_addr) >> PAGE_SHIFT;
 	printk(KERN_ALERT "smokewagon: madvise_desmokewagon(). cpu: %2d, asid: 0x%lx, start_vpn: 0x%lx, end_vpn: 0x%lx, num_pages: %lu\n",
-				smp_processor_id(), atomic_long_read(&(vma->vm_mm->context.id)) & asid_mask, start_addr >> PAGE_SHIFT, end_addr >> PAGE_SHIFT, num_pages);
+				smp_processor_id(), atomic_long_read(&(vma->vm_mm->context.id)) & asid_mask, start_addr >> PAGE_SHIFT, end_addr >> PAGE_SHIFT, num_pages); */
 	walk_page_range_vma(vma, start_addr, end_addr, &desmokewagonify_walk_ops, 0);
 	return 0;
 }
@@ -1147,14 +1149,38 @@ static long madvise_remove(struct vm_area_struct *vma,
  * a mess I want to avoid until I move to a later Linux version that simplifies
  * VMA merging, and we already have the whole mmap_lock anyway.
  */
-inline int allocate_smokewagon_masks_if_none(struct mm_struct *mm) {
+int allocate_smokewagon_masks_if_none(struct mm_struct *mm) {
 	int error = 0;
-	if (!mm->context.smokewagon_masks) {
-		mm->context.smokewagon_masks = kvcalloc(TASK_SIZE >> PAGE_SHIFT, sizeof(cpumask_t), GFP_KERNEL);
-		if (!mm->context.smokewagon_masks) {
-			WARN(true, "smokewagon: kvcalloc of smokewagon_masks failed.");
-			error = -ENOMEM;
+	if (!smp_load_acquire(&mm->context.smokewagon_masks)) {
+		// printk("smokewagon: allocate_smokewagon_masks_if_none: tid: %02d inside guard-if\n", smp_processor_id());
+		// no smokewagon_masks yet, take the publishing lock
+		spin_lock(&mm->context.smokewagon_lock);
+		if (!smp_load_acquire(&mm->context.smokewagon_masks)) {
+			// still no masks, time to allocate and publish
+			cpumask_t* ptr = kvcalloc(TASK_SIZE >> PAGE_SHIFT, sizeof(cpumask_t), GFP_KERNEL);
+			if (!ptr) {
+				WARN(true, "smokewagon: kvcalloc of smokewagon_masks failed.");
+				error = -ENOMEM;
+			} else {
+				// printk(KERN_ALERT "smokewagon: allocated smokewagon_masks\n");
+			}
+
+			// attempt to publish our pointer, cmpxchg is overkill with the spinlock
+			cpumask_t* old = cmpxchg_release(&mm->context.smokewagon_masks, NULL, ptr);
+			if (old) {
+				// old wasn't NULL so somebody else got there ahead of us
+				// how that can happen with the spinlock exclusion i dunno, haven't seen it yet
+				// just dump our allocation and grieve the wasted time
+				kvfree(ptr);
+				// printk(KERN_ALERT "smokewagon: tid: %02d lost smokewagon_masks publishing race AFTER allocating\n", smp_processor_id());
+			} else {
+				// old was NULL, we won the race and published our pointer, woo!
+				// printk(KERN_ALERT "smokewagon: tid: %02d published smokewagon_masks\n", smp_processor_id());
+			}
+		} else {
+			// printk(KERN_ALERT "smokewagon: tid: %02d lost the publishing race\n", smp_processor_id());
 		}
+		spin_unlock(&mm->context.smokewagon_lock);
 	}
 	return error;
 }

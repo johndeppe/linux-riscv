@@ -1601,8 +1601,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 		/* Smokewagon's non-present-but-actually-present PTEs break many
 		 * assumptions inside the zap logic. We already have the pte lock, so
 		 * I'll just quickly put back a regular pte instead of hacking
-		 * everything in folio-zapping land.
-		 */
+		 * everything in folio-zapping land. */
 		if (vma && vma->vm_flags & VM_SMOKEWAGON && is_smokewagon_entry(pte_to_swp_entry(ptent))) {
 			ptent = pfn_pte(swp_offset_pfn(pte_to_swp_entry(ptent)), vm_get_page_prot(vma->vm_flags));
 			set_pte_at(mm, addr, pte, ptent);
@@ -3960,10 +3959,12 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 			//printk(KERN_ALERT "smokewagon: do_swap_page() prelock. entry: 0x%lx, pfn: 0x%lu, vmf->orig_pte: 0x%lx\n", entry.val, swp_offset_pfn(entry), pte_val(vmf->orig_pte));
 			vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd,
 					vmf->address, &vmf->ptl);
+			/*
 			printk(KERN_ALERT "smokewagon: do_swap_page() locked: vmf->pte: 0x%lx, vmf->orig_pte: 0x%lx, vmf->flags 0x%x\n"
 							  "                                   pte_pfn: 0x%lx, swp_pfn: 0x%lx\n",
 							pte_val(ptep_get(vmf->pte)), pte_val(vmf->orig_pte), vmf->flags,
 							pte_pfn(ptep_get(vmf->pte)), swp_offset_pfn(entry));
+			*/
 			smokewagon_load_tlb(vmf);
 			goto unlock;
 		} else if (is_migration_entry(entry)) {
@@ -4547,7 +4548,7 @@ static vm_fault_t __do_fault(struct vm_fault *vmf)
 	struct folio *folio;
 	vm_fault_t ret;
 
-	if (vmf->vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: __do_fault()\n");
+	// if (vmf->vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: __do_fault()\n");
 
 	/*
 	 * Preallocate pte before we take page_lock because this might lead to
@@ -4691,14 +4692,15 @@ static inline void set_smokewagon_ptes(struct mm_struct *mm, unsigned long addr,
 
 	for (;;) {
 		pte_t smokewagon_pte = swp_entry_to_pte(make_smokewagon_entry(pte_pfn(pteval)));
-		printk(KERN_ALERT "smokewagon: set_smokewagon_ptes(): old_pte: 0x%lx, old_pfn: 0x%lx\n"
+		// we're faulting-in a smokewagon'd file, subsequent faults to load TLB will clear the correct bits
+		cpumask_setall(&mm->context.smokewagon_masks[addr >> PAGE_SHIFT]);
+		/* printk(KERN_ALERT "smokewagon: set_smokewagon_ptes(): old_pte: 0x%lx, old_pfn: 0x%lx\n"
 						  "                                   addr: 0x%lx\n"
 						  "                                   smokewagon_entry: 0x%lx, smokewagon_pfn: 0x%lx, smokewagon_pte: 0x%lx\n",
 				pte_val(pteval), pte_pfn(pteval),
 				addr,
 				make_smokewagon_entry(pte_pfn(pteval)).val, swp_offset_pfn(make_smokewagon_entry(pte_pfn(pteval))), pte_val(smokewagon_pte)
-				);
-		cpumask_setall(&mm->context.smokewagon_masks[addr >> PAGE_SHIFT]);
+				); */
 		__set_pte_at(mm, ptep, smokewagon_pte);
 		// TODO could preinsert TLB entry here?
 		if (--nr == 0)
@@ -4747,11 +4749,10 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 		add_mm_counter(vma->vm_mm, mm_counter_file(folio), nr);
 		folio_add_file_rmap_ptes(folio, page, nr, vma);
 	}
-	if (unlikely(vma->vm_flags & VM_SMOKEWAGON)) {
-		printk(KERN_ALERT "smokewagon: set_pte_range(), addr: 0x%lx, vmf->address: 0x%lx, nr: %u, old_pte: 0x%lx, old_pfn: 0x%lx", addr, vmf->address, nr, pte_val(entry), pte_pfn(entry));
-		if (nr > 1) {
-			printk(KERN_ALERT "smokewagon: maybe bug? nr: %d, did entries for nr > 1 form properly?\n", nr);
-		}
+	if (vma->vm_flags & VM_SMOKEWAGON) {
+		// printk(KERN_ALERT "smokewagon: set_pte_range(), addr: 0x%lx, vmf->address: 0x%lx, nr: %u, old_pte: 0x%lx, old_pfn: 0x%lx", addr, vmf->address, nr, pte_val(entry), pte_pfn(entry));
+		// FIXME smokewagon: maybe bug if nr > 1? do entries for nr > 1 form properly?
+		WARN_ON(nr > 1);
 		allocate_smokewagon_masks_if_none(vma->vm_mm); // FIXME kvcalloc can fail but we have no recovery path here.
 		set_smokewagon_ptes(vma->vm_mm, addr, vmf->pte, entry, nr);
 	} else {
@@ -4791,7 +4792,7 @@ vm_fault_t finish_fault(struct vm_fault *vmf)
 	struct page *page;
 	vm_fault_t ret;
 
-if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: finish_fault() 1 cpu: %2d, vmf->orig_pte: 0x%lx\n", smp_processor_id(), pte_val(vmf->orig_pte));
+	// if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: finish_fault() 1 cpu: %2d, vmf->orig_pte: 0x%lx\n", smp_processor_id(), pte_val(vmf->orig_pte));
 	/* Did we COW the page? */
 	if ((vmf->flags & FAULT_FLAG_WRITE) && !(vma->vm_flags & VM_SHARED))
 		page = vmf->cow_page;
@@ -4828,24 +4829,24 @@ if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: finish_fault()
 
 	/* Re-check under ptl */
 	if (likely(!vmf_pte_changed(vmf))) {
-		if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: finish_fault() 2 cpu: %2d, vmf->orig_pte: 0x%lx, *vmf->pte: 0x%lx\n",
-			smp_processor_id(), pte_val(vmf->orig_pte), pte_val(ptep_get(vmf->pte)));
+		/* if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: finish_fault() 2 cpu: %2d, vmf->orig_pte: 0x%lx, *vmf->pte: 0x%lx\n",
+			smp_processor_id(), pte_val(vmf->orig_pte), pte_val(ptep_get(vmf->pte))); */
 		struct folio *folio = page_folio(page);
 
 		set_pte_range(vmf, folio, page, 1, vmf->address);
 		ret = 0;
 	} else {
 		update_mmu_tlb(vma, vmf->address, vmf->pte);
-		if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: finish_fault() 3 cpu: %2d, vmf->orig_pte: 0x%lx, *vmf->pte: 0x%lx\n",
-			smp_processor_id(), pte_val(vmf->orig_pte), pte_val(ptep_get(vmf->pte)));
+		/* if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: finish_fault() 3 cpu: %2d, vmf->orig_pte: 0x%lx, *vmf->pte: 0x%lx\n",
+			smp_processor_id(), pte_val(vmf->orig_pte), pte_val(ptep_get(vmf->pte))); */
 		ret = VM_FAULT_NOPAGE;
 	}
 
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
-	if (vma->vm_flags & VM_SMOKEWAGON) {
+	/* if (vma->vm_flags & VM_SMOKEWAGON) {
 		printk(KERN_ALERT "smokewagon: finish_fault() 4 cpu: %2d, vmf->orig_pte: 0x%lx, *vmf->pte: 0x%lx\n",
 			smp_processor_id(), pte_val(vmf->orig_pte), pte_val(ptep_get(vmf->pte)));
-	}
+	} */
 	return ret;
 }
 
@@ -4960,7 +4961,7 @@ static vm_fault_t do_read_fault(struct vm_fault *vmf)
 	vm_fault_t ret = 0;
 	struct folio *folio;
 
-	if (vmf->vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: do_read_fault()\n");
+	//if (vmf->vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: do_read_fault()\n");
 
 	/*
 	 * Let's call ->map_pages() first and use ->fault() as fallback
@@ -5035,7 +5036,7 @@ static vm_fault_t do_shared_fault(struct vm_fault *vmf)
 	vm_fault_t ret, tmp;
 	struct folio *folio;
 
-	if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: do_shared_fault()\n");
+	// if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: do_shared_fault()\n");
 
 	ret = vmf_can_call_fault(vmf);
 	if (ret)
@@ -5087,7 +5088,7 @@ static vm_fault_t do_fault(struct vm_fault *vmf)
 	struct mm_struct *vm_mm = vma->vm_mm;
 	vm_fault_t ret;
 
-	if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: do_fault() cpu: %2d\n", smp_processor_id());
+	// if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: do_fault() cpu: %2d\n", smp_processor_id());
 
 	/*
 	 * The VMA was not fully populated on mmap() or missing VM_DONTEXPAND
@@ -5388,12 +5389,12 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 		}
 	}
 
-	if (vmf->vma->vm_flags & VM_SMOKEWAGON)	printk(KERN_ALERT "smokewagon: handle_pte_fault() 1: cpu: %2d, vpn: 0x%lx, vmf->orig_pte: 0x%lx\n", smp_processor_id(), vmf->address >> PAGE_SHIFT, pte_val(vmf->orig_pte));
+	// if (vmf->vma->vm_flags & VM_SMOKEWAGON)	printk(KERN_ALERT "smokewagon: handle_pte_fault() 1: cpu: %2d, vpn: 0x%lx, vmf->orig_pte: 0x%lx\n", smp_processor_id(), vmf->address >> PAGE_SHIFT, pte_val(vmf->orig_pte));
 
 	if (!vmf->pte)
 		return do_pte_missing(vmf);
 
-	if (vmf->vma->vm_flags & VM_SMOKEWAGON)	printk(KERN_ALERT "smokewagon: handle_pte_fault() 2: cpu: %2d, vpn: 0x%lx, vmf->orig_pte: 0x%lx\n", smp_processor_id(), vmf->address >> PAGE_SHIFT, pte_val(vmf->orig_pte));
+	// if (vmf->vma->vm_flags & VM_SMOKEWAGON)	printk(KERN_ALERT "smokewagon: handle_pte_fault() 2: cpu: %2d, vpn: 0x%lx, vmf->orig_pte: 0x%lx\n", smp_processor_id(), vmf->address >> PAGE_SHIFT, pte_val(vmf->orig_pte));
 
 	if (!pte_present(vmf->orig_pte))
 		return do_swap_page(vmf);
@@ -5434,7 +5435,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 	}
 unlock:
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
-	if (vmf->vma->vm_flags & VM_SMOKEWAGON)	printk(KERN_ALERT "smokewagon: handle_pte_fault() 3: cpu: %2d, vpn: 0x%lx, vmf->orig_pte: 0x%lx\n", smp_processor_id(), vmf->address >> PAGE_SHIFT, pte_val(vmf->orig_pte));
+	// if (vmf->vma->vm_flags & VM_SMOKEWAGON)	printk(KERN_ALERT "smokewagon: handle_pte_fault() 3: cpu: %2d, vpn: 0x%lx, vmf->orig_pte: 0x%lx\n", smp_processor_id(), vmf->address >> PAGE_SHIFT, pte_val(vmf->orig_pte));
 	return 0;
 }
 

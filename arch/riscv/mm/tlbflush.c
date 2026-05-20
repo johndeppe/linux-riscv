@@ -153,12 +153,13 @@ static void __flush_tlb_range(struct cpumask *cmask, unsigned long asid,
 
 void flush_tlb_mm(struct mm_struct *mm)
 {
-	// flush smokewagon masks if we have them
+	// clear smokewagon masks if we have them
+	// FIXME: clearing everything actually sucks because all masks will be clear and no filtering will happen for subsequent flushes.
 	if (mm->context.smokewagon_masks) {
+		//printk(KERN_ALERT "smokewagon: flush_tlb_mm() cpu: %2d, asid: 0x%lx\n", smp_processor_id(), get_mm_asid(mm));
+		//dump_stack();
 		for (size_t i=0; i < TASK_SIZE >> PAGE_SHIFT; i++) {
-			if (!cpumask_empty(&mm->context.smokewagon_masks[i])) {
-				cpumask_setall(&mm->context.smokewagon_masks[i]);
-			}
+			cpumask_clear(&mm->context.smokewagon_masks[i]);
 		}
 	}
 
@@ -180,10 +181,12 @@ void flush_tlb_mm_range(struct mm_struct *mm,
 		// loop over smokewagon masks for the addresses we're flushing to see if we can filter any cpus from the IPI
 		// if all mask bits are clear, it's a regular page and we should IPI everyone
 		// if any mask bits are set, it's a smokewagon page, and we should IPI only the cpus corresponding to cleared bits
+		// FIXME: we currently presume, by clearing the masks, that flushed smokewagon pages are then unmapped.
+		// FIXME: thus. we need to re-set mask bits in cases like mprotect(), probably by adding this information to mmu_gather
 		for (unsigned long addr = start; addr < end; addr += page_size) {
 			cpumask_and(&smokewagon_filter, &smokewagon_filter, &mm->context.smokewagon_masks[addr >> PAGE_SHIFT]);
 
-			/* debug printks */
+			/* debug printks
 			char mask_buf[NR_CPUS+1];   // debug printk buffer
 			char filter_buf[NR_CPUS+1]; // debug printk buffer
 			for (size_t i=0; i<nr_cpu_ids;i++) {mask_buf[i] = cpumask_test_cpu(i,&mm->context.smokewagon_masks[addr >> PAGE_SHIFT]) ? '1' : '0';} mask_buf[nr_cpu_ids] = '\0';
@@ -196,25 +199,16 @@ void flush_tlb_mm_range(struct mm_struct *mm,
 				   addr >> PAGE_SHIFT,
 				   mask_buf,
 				   filter_buf);
+			*/
+
+			cpumask_clear(&mm->context.smokewagon_masks[addr >> PAGE_SHIFT]);
 		}
 
-		// AND the process mask with the inverted now-complete smokewagon filter to get our IPI cpumask
+		// AND the process mask with the NOT of the now-complete smokewagon filter to get our IPI cpumask
 		cpumask_andnot(&smokewagon_filter, mm_cpumask(mm), &smokewagon_filter);
 
 		// our final filter should be a subset of the mm cpumask, or something is terribly wrong
 		WARN_ON(!cpumask_subset(&smokewagon_filter, mm_cpumask(mm)));
-
-		// now that we know which CPUs we're IPIing, re-set their smokewagon bits
-		// don't set smokewagon bits for normal pages, only ones with smokewagon bits already set
-		// if a smokewagon pages somehow clears every page, this won't re-set them. that might be an optimization!
-		// we can't do this in the first loop because it will set bits for pages we don't flush
-		if (!cpumask_empty(&smokewagon_filter)) {
-			for (unsigned long addr = start; addr < end; addr += page_size) {
-				if (!cpumask_empty(&mm->context.smokewagon_masks[addr >> PAGE_SHIFT])) {
-					cpumask_or(&mm->context.smokewagon_masks[addr >> PAGE_SHIFT], &smokewagon_filter, &mm->context.smokewagon_masks[addr >> PAGE_SHIFT]);
-				}
-			}
-		}
 	}
 
 	__flush_tlb_range(cpumask_to_flush, get_mm_asid(mm),
@@ -456,7 +450,7 @@ inline void smokewagon_load_tlb(struct vm_fault *vmf)
 	if (vmf->vma->vm_flags & VM_WRITE)
 		smel = pte_mkwrite(pte_mkdirty(smel), vmf->vma);
 
-	/* debug printk */
+	/* debug printk
 	printk(KERN_ALERT "smokewagon_load_tlb(): cpu: %2d, pte: 0x%lx, orig_pte: 0x%lx\n"
 					  "                       smeh: 0x%lx, asid: 0x%lx, vpn: 0x%lx, addr: 0x%lx\n"
 					  "                       smel: 0x%lx, pfn: 0x%lx, V: %lx, R: %lx, W: %lx, X: %lx, U: %lx, G: %lx, A: %lx, D: %lx\n"
@@ -467,26 +461,31 @@ inline void smokewagon_load_tlb(struct vm_fault *vmf)
 		smel.pte, pfn, smel.pte & _PAGE_PRESENT, smel.pte & _PAGE_READ, smel.pte & _PAGE_WRITE, smel.pte & _PAGE_EXEC, smel.pte & _PAGE_USER, smel.pte & _PAGE_GLOBAL, smel.pte & _PAGE_ACCESSED, smel.pte & _PAGE_DIRTY,
 		vmf->vma->vm_flags, vmf->vma->vm_flags & VM_READ, vmf->vma->vm_flags & VM_WRITE, vmf->vma->vm_flags & VM_EXEC, vmf->vma->vm_flags & VM_SHARED,
 		vmf->vma->vm_flags & VM_SMOKEWAGON,vmf->vma->vm_flags & VM_MAYREAD, vmf->vma->vm_flags & VM_MAYWRITE, vmf->vma->vm_flags & VM_MAYEXEC, vmf->vma->vm_flags & VM_MAYSHARE);
+	*/
 
 	/* construct smcir */
 	unsigned long smcir = asid | SMCIR_TLBWR; // TLBWR overwrites a random entry
 
-	/* debug printk */
+	/* debug printk
 	cpumask_t before = vmf->vma->vm_mm->context.smokewagon_masks[vpn];
 	char before_buf[NR_CPUS+1];
 	for (size_t i=0; i<nr_cpu_ids;i++) {before_buf[i] = cpumask_test_cpu(i,&before) ? '1' : '0';}
 	before_buf[nr_cpu_ids] = '\0';
-	printk("smokewagon: smokewagon_load_tlb(): cpu: %2d, vpn: 0x%lx, before: %s\n", smp_processor_id(), vpn, before_buf);
+	*/
 
 	/* clear cpu's bit in page's smokewagon mask */
 	cpumask_clear_cpu(smp_processor_id(), &vmf->vma->vm_mm->context.smokewagon_masks[vpn]);
 
-	/* debug printk */
+	/* debug printk
 	cpumask_t after = vmf->vma->vm_mm->context.smokewagon_masks[vpn];
 	char after_buf[NR_CPUS+1];
 	for (size_t i=0; i<nr_cpu_ids;i++) {after_buf[i] = cpumask_test_cpu(i,&after) ? '1' : '0';}
 	after_buf[nr_cpu_ids] = '\0';
-	printk("smokewagon: smokewagon_load_tlb(): cpu: %2d, vpn: 0x%lx,  after: %s\n", smp_processor_id(), vpn, after_buf);
+	printk("smokewagon: smokewagon_load_tlb(): cpu: %2d, vpn: 0x%lx, before: %s\n"
+		   "                                                             after: %s\n",
+		    smp_processor_id(), vpn, before_buf,
+			after_buf);
+	*/
 
 	csr_write(CSR_SMEH, smeh);
 	csr_write(CSR_SMEL, smel.pte);

@@ -3258,7 +3258,7 @@ vm_fault_t filemap_fault(struct vm_fault *vmf)
 	vm_fault_t ret = 0;
 	bool mapping_locked = false;
 
-	if (vmf->vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: filemap_fault(): cpu: %2d\n", smp_processor_id());
+	// if (vmf->vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: filemap_fault(): cpu: %2d\n", smp_processor_id());
 
 	max_idx = DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE);
 	if (unlikely(index >= max_idx))
