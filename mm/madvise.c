@@ -62,7 +62,7 @@ static int madvise_need_mmap_write(int behavior)
 	case MADV_COLLAPSE:
 	case MADV_PROBE_TLB:
 		return 0;
-	case MADV_PRIVATE_TLB:
+	case MADV_SMOKEWAGON:
 	case MADV_NORMAL_TLB:
 	default:
 		/* be safe, default to 1. list exceptions explicitly */
@@ -81,7 +81,7 @@ static int smokewagonify_ptes(pmd_t *pmd, unsigned long addr,
 {
 	pte_t *ptep, pte;
 	spinlock_t *ptl;
-	cpumask_t *masks = walk->mm->context.smokewagon_masks;
+	struct xarray* smokewagon_xa = walk->mm->context.smokewagon_xa;
 
 	ptep = pte_offset_map_lock(walk->mm, pmd, addr, &ptl);
 	if (!ptep) {
@@ -90,30 +90,72 @@ static int smokewagonify_ptes(pmd_t *pmd, unsigned long addr,
 		return 0;
 	}
 	for (; addr != end; ptep++, addr += PAGE_SIZE) {
+		unsigned long vpn = addr >> PAGE_SHIFT;
 		pte = ptep_get(ptep);
 
-		// TODO think harder about what kinds of PTEs we can encounter and check for them: swap, "special", others?
-		if (!pte_present(pte)) {
-			cpumask_setall(&masks[addr >> PAGE_SHIFT]);
-			printk(KERN_ALERT "smokewagon: smokewagonify_ptes(): cpu: %2d, skipping vpn: 0x%lx, pte: 0x%lx\n", smp_processor_id(), addr >> PAGE_SHIFT, pte.pte);
+		/* if smokewagon mask exists, that's okay!
+		 *     if smokewagon entry present: that's okay!
+		 *     if no PTE present or regular PTE exists: throw error
+		 * if no smokewagon mask, allocate one and insert it
+		 *     if PTE present: copy mask from process
+		 *     if no PTE present: clear new mask
+		 *
+		 * TODO: deal with more kinds of PTEs we can encounter:
+		 *       swap, smokewagon, userfaultfd, "special", others?
+		 *       supporting swap would be particularly nice. */
+
+		cpumask_t* old_mask = xa_load(smokewagon_xa, addr);
+		if (old_mask) {
+			if (!is_smokewagon_entry(pte_to_swp_entry(pte))) {
+				printk(KERN_ALERT "smokewagon: smokewagonify_ptes(): existing mask entry didn't have smokewagon entry!?\n"
+				                  "            cpu: %2d, vpn: 0x%lx, pte: 0x%lx, old_mask: %p\n", smp_processor_id(), vpn, pte.pte, old_mask);
+			}
 			continue;
 		}
 
-		swp_entry_t smokewagon_entry = make_smokewagon_entry(pte_pfn(pte));
-		// clear (0) smokewagon mask bit means DO interrupt this cpu at shootdown, TLB is dirty
-		//   set (1) smokewagon mask bit means DO NOT interrupt this cpu at shootdown, TLB is clean
-		// accordingly, set the page's smokewagon mask to the complement of mm_cpumask
-		bitmap_complement(cpumask_bits(&masks[addr >> PAGE_SHIFT]), cpumask_bits(mm_cpumask(walk->mm)), small_cpumask_bits);
-		set_pte_at(walk->mm, addr, ptep, swp_entry_to_pte(smokewagon_entry));
+		// since there's no old mask, we need a new one
+		cpumask_t* new_mask = kmalloc(cpumask_size(), GFP_KERNEL);
+		if (!new_mask) {
+			printk(KERN_ALERT "smokewagon: smokewagonify_ptes(): mask allocation failed. cpu: %2d, vpn: 0x%lx, pte: 0x%lx\n", smp_processor_id(), vpn, pte.pte);
+			return -ENOMEM;
+		}
+		
+		if (pte_present(pte)) {
+			// clear (0) smokewagon mask bit means DO NOT interrupt this cpu at shootdown, TLB is clean
+			//   set (1) smokewagon mask bit means DO interrupt this cpu at shootdown, TLB is dirty
+			// accordingly, set page's smokewagon mask to match mm_cpumask, since those TLBs could be dirty
+			cpumask_copy(new_mask, mm_cpumask(walk->mm));
+			printk(KERN_ALERT "smokewagon: smokewagonify_ptes(): pte_present cpu: %2d, vpn: 0x%lx, pte: 0x%lx\n", smp_processor_id(), vpn, pte.pte);
+		} else {
+			// PTE isn't present so TLB can't be dirty. insert a clean smokewagon mask
+			cpumask_clear(new_mask);
+			printk(KERN_ALERT "smokewagon: smokewagonify_ptes(): !pte_present cpu: %2d, vpn: 0x%lx, pte: 0x%lx\n", smp_processor_id(), vpn, pte.pte);
+		}
+
+		// xa_cmpxchg is maybe overkill here, but let's do belt-and-suspenders for now
+		cpumask_t* ret_mask = xa_cmpxchg(smokewagon_xa, addr, NULL, new_mask, GFP_KERNEL);
+		if (xa_err(ret_mask)) {
+			printk(KERN_ALERT "smokewagon: smokewagonify_ptes(): xa_cmpxchg failed. xa_err: %d, cpu: %2d, vpn: 0x%lx, pte: 0x%lx\n", xa_err(ret_mask), smp_processor_id(), vpn, pte.pte);
+			kfree(new_mask);
+		} else if (ret_mask != NULL) {
+			printk(KERN_ALERT "smokewagon: smokewagonify_ptes(): ret_mask wasn't NULL. cpu: %2d, vpn: 0x%lx, pte: 0x%lx\n", smp_processor_id(), vpn, pte.pte);
+			kfree(new_mask);
+		}
+
+		if (pte_present(pte)) {
+			swp_entry_t smokewagon_entry = make_smokewagon_entry(pte_pfn(pte));
+			set_pte_at(walk->mm, addr, ptep, swp_entry_to_pte(smokewagon_entry));
+		}
 
 		char debug_buf[NR_CPUS+1];
-		for (size_t i=0; i<nr_cpu_ids;i++) {debug_buf[i] = cpumask_test_cpu(i,&masks[addr >> PAGE_SHIFT]) ? '1' : '0';}
+		for (size_t i=0; i<nr_cpu_ids;i++) {debug_buf[i] = cpumask_test_cpu(i,new_mask) ? '1' : '0';}
 		debug_buf[nr_cpu_ids] = '\0';
+
 		printk(KERN_ALERT "smokewagon: smokewagonify_ptes(): cpu: %2d, vpn: 0x%lx, cpumask: %s\n"
-						  "                                  pfn: 0x%lx, smokewagon_entry: 0x%lx\n"
+						  "                                  pfn: 0x%lx\n"
 						  "                                  pte: %lx, V: %lx, R: %lx, W: %lx, X: %lx, U: %lx, G: %lx, A: %lx, D: %lx\n",
 			smp_processor_id(), addr >> PAGE_SHIFT, debug_buf,
-			pte_pfn(pte), smokewagon_entry.val,
+			pte_pfn(pte),
 			pte.pte, pte.pte & _PAGE_PRESENT, pte.pte & _PAGE_READ, pte.pte & _PAGE_WRITE, pte.pte & _PAGE_EXEC, pte.pte & _PAGE_USER, pte.pte & _PAGE_GLOBAL, pte.pte & _PAGE_ACCESSED, pte.pte & _PAGE_DIRTY);
 	}
 	pte_unmap_unlock(ptep - 1, ptl);
@@ -133,16 +175,12 @@ static long madvise_smokewagon(struct vm_area_struct *vma,
 			struct vm_area_struct **prev,
 			unsigned long start_addr, unsigned long end_addr)
 {
+	/* debug printk */
 	long unsigned num_pages = (end_addr - start_addr) >> PAGE_SHIFT;
 	printk(KERN_ALERT "smokewagon: madvise_smokewagon(). cpu: %2d, asid: 0x%lx, start_vpn: 0x%lx, end_vpn: 0x%lx, num_pages: %lu\n",
 				smp_processor_id(), atomic_long_read(&(vma->vm_mm->context.id)) & asid_mask, start_addr >> PAGE_SHIFT, end_addr >> PAGE_SHIFT, num_pages);
-	/* page walk doesn't allocate, won't fail
-	 * use walk_page_range_vma() since madvise_walk_vmas() already walks vmas */
-	walk_page_range_vma(vma, start_addr, end_addr, &smokewagonify_walk_ops, 0);
-	// can remove TLB flush, we don't need it, just useful for debug
-	// printk(KERN_ALERT "smokewagon: madvise_smokewagon()'s flush_tlb_range(), cpu: %2d, start: 0x%lx, end: 0x%lx\n", smp_processor_id(), start_addr, end_addr);
-	// flush_tlb_range(vma, start_addr, end_addr);
-	return 0;
+	/* use walk_page_range_vma() since madvise_walk_vmas() already walks vmas */
+	return walk_page_range_vma(vma, start_addr, end_addr, &smokewagonify_walk_ops, 0);
 }
 
 /*
@@ -157,7 +195,7 @@ static int desmokewagonify_ptes(pmd_t *pmd, unsigned long addr,
 	pte_t *ptep, pte;
 	spinlock_t *ptl;
 	swp_entry_t swp;
-	cpumask_t *masks = walk->mm->context.smokewagon_masks;
+	struct xarray* smokewagon_xa = walk->mm->context.smokewagon_xa;
 
 	ptep = pte_offset_map_lock(walk->mm, pmd, addr, &ptl);
 	if (!ptep) {
@@ -168,13 +206,18 @@ static int desmokewagonify_ptes(pmd_t *pmd, unsigned long addr,
 	for (; addr != end; ptep++, addr += PAGE_SIZE) {
 		pte = ptep_get(ptep);
 		swp = pte_to_swp_entry(pte);
-		//printk(KERN_ALERT "smokewagon: desmokewagonify_ptes(): cpu: %2d, vpn: 0x%lx, pte: 0x%lx, pfn: 0x%lx\n", smp_processor_id(), addr >> PAGE_SHIFT, pte.pte, pte_pfn(pte));
+		printk(KERN_ALERT "smokewagon: desmokewagonify_ptes(): cpu: %2d, vpn: 0x%lx, pte: 0x%lx, pfn: 0x%lx\n", smp_processor_id(), addr >> PAGE_SHIFT, pte.pte, pte_pfn(pte));
 		if (is_smokewagon_entry(swp)) {
 			pte_t new_pte = pfn_pte(swp_offset_pfn(swp), vm_get_page_prot(walk->vma->vm_flags));
-			//printk(KERN_ALERT "smokewagon: desmokewagonify_ptes(): swp: 0x%lx, swp_pfn: 0x%lx, new_pte: 0x%lx, new_pfn: 0x%lx\n", swp.val, swp_offset_pfn(swp), new_pte.pte, pte_pfn(new_pte));
+			// printk(KERN_ALERT "smokewagon: desmokewagonify_ptes(): swp: 0x%lx, swp_pfn: 0x%lx, new_pte: 0x%lx, new_pfn: 0x%lx\n", swp.val, swp_offset_pfn(swp), new_pte.pte, pte_pfn(new_pte));
 			set_pte_at(walk->mm, addr, ptep, new_pte);
-			cpumask_clear(&masks[addr >> PAGE_SHIFT]);
-			/* no TLB flush required, the actual mapping didn't change, just our accounting */
+			struct cpumask* erased_mask = xa_erase(smokewagon_xa, addr);
+			if(xa_err(erased_mask)) {
+				printk(KERN_ALERT "smokewagon: desmokewagonify_ptes(): xa_erase failed: xa_err: %d, cpu: %2d, vpn: 0x%lx, pte: 0x%lx, pfn: 0x%lx\n", xa_err(erased_mask), smp_processor_id(), addr >> PAGE_SHIFT, pte.pte, pte_pfn(pte));
+			} else {
+				kfree(erased_mask);
+			}
+			/* No TLB flush required. The actual mapping didn't change, only our accounting did. */
 		}
 	}
 	pte_unmap_unlock(ptep - 1, ptl);
@@ -1141,48 +1184,32 @@ static long madvise_remove(struct vm_area_struct *vma,
 }
 
 /*
- * If we haven't already, kvcalloc a LARGE array of cpumasks, one mask per page
- * in the mm's virtual userspace.
- *
- * Aspirational TODO: it would be nice to swap to cpumask storage that we could
- * deallocate, such as smaller arrays attached to VMAs. However, VMA merging is
- * a mess I want to avoid until I move to a later Linux version that simplifies
- * VMA merging, and we already have the whole mmap_lock anyway.
+ * Attempt allocating the xarray base and publishing it to the mm
  */
-int allocate_smokewagon_masks_if_none(struct mm_struct *mm) {
-	int error = 0;
-	if (!smp_load_acquire(&mm->context.smokewagon_masks)) {
-		// printk("smokewagon: allocate_smokewagon_masks_if_none: tid: %02d inside guard-if\n", smp_processor_id());
-		// no smokewagon_masks yet, take the publishing lock
-		spin_lock(&mm->context.smokewagon_lock);
-		if (!smp_load_acquire(&mm->context.smokewagon_masks)) {
-			// still no masks, time to allocate and publish
-			cpumask_t* ptr = kvcalloc(TASK_SIZE >> PAGE_SHIFT, sizeof(cpumask_t), GFP_KERNEL);
-			if (!ptr) {
-				WARN(true, "smokewagon: kvcalloc of smokewagon_masks failed.");
-				error = -ENOMEM;
-			} else {
-				// printk(KERN_ALERT "smokewagon: allocated smokewagon_masks\n");
-			}
-
-			// attempt to publish our pointer, cmpxchg is overkill with the spinlock
-			cpumask_t* old = cmpxchg_release(&mm->context.smokewagon_masks, NULL, ptr);
-			if (old) {
-				// old wasn't NULL so somebody else got there ahead of us
-				// how that can happen with the spinlock exclusion i dunno, haven't seen it yet
-				// just dump our allocation and grieve the wasted time
-				kvfree(ptr);
-				// printk(KERN_ALERT "smokewagon: tid: %02d lost smokewagon_masks publishing race AFTER allocating\n", smp_processor_id());
-			} else {
-				// old was NULL, we won the race and published our pointer, woo!
-				// printk(KERN_ALERT "smokewagon: tid: %02d published smokewagon_masks\n", smp_processor_id());
-			}
-		} else {
-			// printk(KERN_ALERT "smokewagon: tid: %02d lost the publishing race\n", smp_processor_id());
+int allocate_smokewagon_xa(struct mm_struct *mm) {
+	if (!smp_load_acquire(&mm->context.smokewagon_xa)) {
+		// still no masks, time to allocate and publish
+		printk(KERN_ALERT "smokewagon: allocate_smokewagon_xa: cpu: %2d inside guard\n", smp_processor_id());
+		struct xarray *xa = kmalloc(sizeof(struct xarray), GFP_KERNEL);
+		if (!xa) {
+			printk(KERN_ALERT "smokewagon: allocate_smokewagon_xa: kmalloc failed. cpu: %2d\n", smp_processor_id());
+			return -ENOMEM;
 		}
-		spin_unlock(&mm->context.smokewagon_lock);
+
+		xa_init(xa);
+
+		// attempt to publish our pointer
+		struct xarray * old = cmpxchg_release(&mm->context.smokewagon_xa, NULL, xa);
+		if (old) {
+			// old wasn't NULL: somebody else got there ahead of us
+			kfree(xa);
+			printk(KERN_ALERT "smokewagon: allocate_smokewagon_xa: cpu: %2d lost smokewagon_xa publishing race\n", smp_processor_id());
+		} else {
+			// old was NULL: pointer sucessfully published
+			printk(KERN_ALERT "smokewagon: allocate_smokewagon_xa: cpu: %2d published smokewagon_xa\n", smp_processor_id());
+		}
 	}
-	return error;
+	return 0;
 }
 
 /*
@@ -1263,10 +1290,11 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 		break;
 	case MADV_COLLAPSE:
 		return madvise_collapse(vma, prev, start, end);
-	case MADV_PRIVATE_TLB:
+	case MADV_SMOKEWAGON:
 		new_flags |= VM_SMOKEWAGON; // must set VMA bit before changing PTEs so page faults won't get confused
 		// vm_flags are in include/linux/mm.h line 264 or so
 		// pgprot_t are kinda like the arch/riscv/include/asm/pgtable-bits.h ones but not exactly
+		/*
 		printk(KERN_ALERT "smokewagon: madvise_vma_behavior(): behavior: %lu, vma: 0x%p, prev: 0x%p, start: 0x%lx, end: 0x%lx\n"
 						  "                                    vm_flags: 0x%lx, new_flags: 0x%lx, vma->vm_page_prot: 0x%lx\n"
 						  "                                    VM_READ: %lx, VM_WRITE: %lx, VM_EXEC: %lx, VM_SHARED: %lx\n"
@@ -1277,7 +1305,8 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 			vma->vm_flags & VM_READ, vma->vm_flags & VM_WRITE, vma->vm_flags & VM_EXEC, vma->vm_flags & VM_SHARED,
 			vma->vm_flags & VM_SMOKEWAGON, vma->vm_flags & VM_MAYREAD, vma->vm_flags & VM_MAYWRITE, vma->vm_flags & VM_MAYEXEC, vma->vm_flags & VM_MAYSHARE,
 			pgprot_val(vma->vm_page_prot), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_READ), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_WRITE), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_EXEC));
-		error = allocate_smokewagon_masks_if_none(vma->vm_mm);
+		*/
+		error = allocate_smokewagon_xa(vma->vm_mm);
 		if (error)
 			goto out;
 		break;
@@ -1299,11 +1328,8 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 	anon_vma_name_put(anon_name);
 
 	switch(behavior) {
-	case MADV_PRIVATE_TLB:
+	case MADV_SMOKEWAGON:
 		error = madvise_smokewagon(vma, prev, start, end);
-		if (error) {
-			// only error is allocation failure
-		}
 		//printk(KERN_ALERT "smokewagon: madvise_vma_behavior()2 vm_flags: 0x%lx, VM_READ: %lx, VM_WRITE: %lx, VM_EXEC: %lx, VM_SHARED: %lx, VM_SMOKEWAGON: %lx, VM_MAYREAD: %lx, VM_MAYWRITE: %lx, VM_MAYEXEC: %lx, VM_MAYSHARE: %lx\n", vma->vm_flags, vma->vm_flags & VM_READ, vma->vm_flags & VM_WRITE, vma->vm_flags & VM_EXEC, vma->vm_flags & VM_SHARED, vma->vm_flags & VM_SMOKEWAGON, vma->vm_flags & VM_MAYREAD, vma->vm_flags & VM_MAYWRITE, vma->vm_flags & VM_MAYEXEC, vma->vm_flags & VM_MAYSHARE);
 		//printk(KERN_ALERT "smokewagon: madvise_vma_behavior()2 vm_page_prot: 0x%lx, PAGE_READ: %lx, PAGE_WRITE: %lx, PAGE_EXEC: %lx\n", pgprot_val(vma->vm_page_prot), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_READ), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_WRITE), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_EXEC));
 		break;
@@ -1404,7 +1430,7 @@ madvise_behavior_valid(int behavior)
 	case MADV_SOFT_OFFLINE:
 	case MADV_HWPOISON:
 #endif
-	case MADV_PRIVATE_TLB:
+	case MADV_SMOKEWAGON:
 	case MADV_NORMAL_TLB:
 	case MADV_PROBE_TLB:
 		return true;

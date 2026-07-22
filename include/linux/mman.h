@@ -147,7 +147,8 @@ calc_vm_prot_bits(unsigned long prot, unsigned long pkey)
 	       arch_calc_vm_prot_bits(prot, pkey);
 }
 
-int allocate_smokewagon_masks_if_none(struct mm_struct *mm);
+int allocate_smokewagon_xa(struct mm_struct *mm);
+inline int allocate_smokewagon_mask_if_none(struct mm_struct *mm, unsigned long addr);
 
 /*
  * Combine the mmap "flags" argument into "vm_flags" used internally.
@@ -155,15 +156,15 @@ int allocate_smokewagon_masks_if_none(struct mm_struct *mm);
 static inline unsigned long
 calc_vm_flag_bits(unsigned long flags)
 {
-	/* if (flags & MAP_PRIVATE_TLB) {
-		printk(KERN_ALERT "smokewagon: calc_vm_flag_bits(). cpu: %2d, flags: 0x%lx, MAP_PRIVATE_TLB: 0x%lx\n",
-				smp_processor_id(), flags, flags & MAP_PRIVATE_TLB);
+	/* if (flags & MAP_SMOKEWAGON) {
+		printk(KERN_ALERT "smokewagon: calc_vm_flag_bits(). cpu: %2d, flags: 0x%lx, MAP_SMOKEWAGON: 0x%lx\n",
+				smp_processor_id(), flags, flags & MAP_SMOKEWAGON);
 	} */
 	return _calc_vm_trans(flags, MAP_GROWSDOWN,  VM_GROWSDOWN ) |
 	       _calc_vm_trans(flags, MAP_LOCKED,     VM_LOCKED    ) |
 	       _calc_vm_trans(flags, MAP_SYNC,	     VM_SYNC      ) |
 	       _calc_vm_trans(flags, MAP_STACK,	     VM_NOHUGEPAGE) |
-	       _calc_vm_trans(flags, MAP_PRIVATE_TLB,VM_SMOKEWAGON) |
+	       _calc_vm_trans(flags, MAP_SMOKEWAGON ,VM_SMOKEWAGON) |
 	       arch_calc_vm_flag_bits(flags);
 }
 

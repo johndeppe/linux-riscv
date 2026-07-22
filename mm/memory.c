@@ -4508,21 +4508,23 @@ setpte:
 		unsigned long old_entry = pte_val(entry);
 		entry = swp_entry_to_pte(swp_entry);
 		printk(KERN_ALERT "smokewagon: do_anonymous_page(): cpu: %2d, vpn: 0x%lx, pfn: 0x%lx, old_entry: 0x%lx, vmf->flags: 0x%x\n"
-						  "                                 swp_pfn: 0x%lx, swp_entry: 0x%lx, entry: 0x%lx, vma->vm_page_prot: 0x%lx\n"
-						  "                                 vm_flags: 0x%lx, VM_READ: %lx, VM_WRITE: %lx, VM_EXEC: %lx, VM_SHARED: %lx, VM_SMOKEWAGON: %lx, VM_MAYREAD: %lx, VM_MAYWRITE: %lx, VM_MAYEXEC: %lx, VM_MAYSHARE: %lx\n"
+						  "                                 swp_pfn: 0x%lx, swp_entry: 0x%lx, entry: 0x%lx\n"
+						  "                                 vm_flags: 0x%lx, VM_READ: %lx, VM_WRITE: %lx, VM_EXEC: %lx, VM_SHARED: %lx\n"
+						  "                                   VM_SMOKEWAGON: %lx, VM_MAYREAD: %lx, VM_MAYWRITE: %lx, VM_MAYEXEC: %lx, VM_MAYSHARE: %lx\n"
 						  "                                 vm_page_prot: 0x%lx, PAGE_READ: %lx, PAGE_WRITE: %lx, PAGE_EXEC: %lx\n",
 			smp_processor_id(), addr >> PAGE_SHIFT, pfn, old_entry, vmf->flags,
-			swp_offset_pfn(swp_entry), swp_entry.val, entry.pte, pgprot_val(vma->vm_page_prot),
-			vma->vm_flags, vma->vm_flags & VM_READ, vma->vm_flags & VM_WRITE, vma->vm_flags & VM_EXEC, vma->vm_flags & VM_SHARED, vma->vm_flags & VM_SMOKEWAGON, vma->vm_flags & VM_MAYREAD, vma->vm_flags & VM_MAYWRITE, vma->vm_flags & VM_MAYEXEC, vma->vm_flags & VM_MAYSHARE,
+			swp_offset_pfn(swp_entry), swp_entry.val, entry.pte,
+			vma->vm_flags, vma->vm_flags & VM_READ, vma->vm_flags & VM_WRITE, vma->vm_flags & VM_EXEC, vma->vm_flags & VM_SHARED, vma->vm_flags & VM_SMOKEWAGON,
+			vma->vm_flags & VM_MAYREAD, vma->vm_flags & VM_MAYWRITE, vma->vm_flags & VM_MAYEXEC, vma->vm_flags & VM_MAYSHARE,
 			pgprot_val(vma->vm_page_prot), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_READ), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_WRITE), pgprot_val(vma->vm_page_prot) & pgprot_val(PAGE_EXEC));
 		//smokewagon_load_tlb(vmf); // optimization: since we're just going to re-fault here, why not just load TLB now?
 		if (nr_pages > 1) {
 			printk(KERN_ALERT "smokewagon: maybe bug? nr_pages: %d, did entries for nr_pages > 1 form properly?\n", nr_pages);
 		}
 	}
-	if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: do_anonymous_page() before set: cpu: %2d, pte: 0x%lx, entry: 0x%lx, nr_pages: %d\n", smp_processor_id(), pte_val(ptep_get(vmf->pte)), pte_val(entry), nr_pages);
+	if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: do_anonymous_page() before set: cpu: %2d, entry: 0x%lx, nr_pages: %d, pte: 0x%lx\n", smp_processor_id(), pte_val(entry), nr_pages, pte_val(ptep_get(vmf->pte)));
 	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr_pages);
-	if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: do_anonymous_page()  after set: cpu: %2d, pte: 0x%lx, entry: 0x%lx, nr_pages: %d\n", smp_processor_id(), pte_val(ptep_get(vmf->pte)), pte_val(entry), nr_pages);
+	if (vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: do_anonymous_page()  after set: cpu: %2d, entry: 0x%lx, nr_pages: %d, pte: 0x%lx\n", smp_processor_id(), pte_val(entry), nr_pages, pte_val(ptep_get(vmf->pte)));
 
 	/* No need to invalidate - it was non-present before */
 	update_mmu_cache_range(vmf, vma, addr, vmf->pte, nr_pages);
@@ -4548,7 +4550,7 @@ static vm_fault_t __do_fault(struct vm_fault *vmf)
 	struct folio *folio;
 	vm_fault_t ret;
 
-	// if (vmf->vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: __do_fault()\n");
+	if (vmf->vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: __do_fault()\n");
 
 	/*
 	 * Preallocate pte before we take page_lock because this might lead to
@@ -4685,6 +4687,33 @@ vm_fault_t do_set_pmd(struct vm_fault *vmf, struct page *page)
 }
 #endif
 
+inline int allocate_smokewagon_mask_if_none(struct mm_struct *mm, unsigned long addr)
+{
+	struct xarray* smokewagon_xa = mm->context.smokewagon_xa;
+
+	cpumask_t* mask = xa_load(smokewagon_xa, addr);
+	if (!mask) {
+		cpumask_t* mask = kmalloc(cpumask_size(), GFP_KERNEL);
+		if (!mask) {
+			printk(KERN_ALERT "smokewagon: allocate_smokewagon_mask_if_none(): allocation failed. cpu: %2d, mm: 0x%p, addr: 0x%lx\n", smp_processor_id(), mm, addr);
+			return -ENOMEM;
+		}
+		cpumask_clear(mask);
+		cpumask_t* ret_mask = xa_cmpxchg(smokewagon_xa, addr, NULL, mask, GFP_KERNEL);
+		if (xa_err(ret_mask)) {
+			printk(KERN_ALERT "smokewagon: allocate_smokewagon_mask_if_none(): xa_cmpxchg failed. xa_err: %d, cpu: %2d, mm: 0x%p, addr: 0x%lx\n", xa_err(ret_mask), smp_processor_id(), mm, addr);
+			kfree(mask);
+			return -ENOMEM;
+		} else if (ret_mask != NULL) {
+			printk(KERN_ALERT "smokewagon: allocate_smokewagon_mask_if_none(): ret_mask wasn't NULL. cpu: %2d, mm: 0x%p, addr: 0x%lx\n", smp_processor_id(), mm, addr);
+			kfree(mask);
+		} else {
+			printk(KERN_ALERT "smokewagon: allocate_smokewagon_mask_if_none(): !pte_present but mask was present. that's weird. cpu: %2d, mm: 0x%p, addr: 0x%lx\n", smp_processor_id(), mm, addr);
+		}
+	}
+	return 0;
+}
+
 static inline void set_smokewagon_ptes(struct mm_struct *mm, unsigned long addr,
 		pte_t *ptep, pte_t pteval, unsigned int nr)
 {
@@ -4692,15 +4721,17 @@ static inline void set_smokewagon_ptes(struct mm_struct *mm, unsigned long addr,
 
 	for (;;) {
 		pte_t smokewagon_pte = swp_entry_to_pte(make_smokewagon_entry(pte_pfn(pteval)));
-		// we're faulting-in a smokewagon'd file, subsequent faults to load TLB will clear the correct bits
-		cpumask_setall(&mm->context.smokewagon_masks[addr >> PAGE_SHIFT]);
-		/* printk(KERN_ALERT "smokewagon: set_smokewagon_ptes(): old_pte: 0x%lx, old_pfn: 0x%lx\n"
-						  "                                   addr: 0x%lx\n"
-						  "                                   smokewagon_entry: 0x%lx, smokewagon_pfn: 0x%lx, smokewagon_pte: 0x%lx\n",
-				pte_val(pteval), pte_pfn(pteval),
-				addr,
-				make_smokewagon_entry(pte_pfn(pteval)).val, swp_offset_pfn(make_smokewagon_entry(pte_pfn(pteval))), pte_val(smokewagon_pte)
-				); */
+		// we're just faulting-in a smokewagon'd file, subsequent faults will load TLB and set cpumask bits
+		// FIXME allocation can fail but we have no recovery path
+		cpumask_t* mask = xa_load(mm->context.smokewagon_xa, addr);
+		if (mask) {
+			if (xa_err(mask)) {
+				printk(KERN_ALERT "smokewagon: set_smokewagon_ptes(): xa_err(mask) cpu: %02d", smp_processor_id());
+			}
+		} else {
+			// no mask, need to allocate one
+			allocate_smokewagon_mask_if_none(mm, addr); // FIXME allocations can fail but we can't cope with that here.
+		}
 		__set_pte_at(mm, ptep, smokewagon_pte);
 		// TODO could preinsert TLB entry here?
 		if (--nr == 0)
@@ -4753,7 +4784,6 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 		// printk(KERN_ALERT "smokewagon: set_pte_range(), addr: 0x%lx, vmf->address: 0x%lx, nr: %u, old_pte: 0x%lx, old_pfn: 0x%lx", addr, vmf->address, nr, pte_val(entry), pte_pfn(entry));
 		// FIXME smokewagon: maybe bug if nr > 1? do entries for nr > 1 form properly?
 		WARN_ON(nr > 1);
-		allocate_smokewagon_masks_if_none(vma->vm_mm); // FIXME kvcalloc can fail but we have no recovery path here.
 		set_smokewagon_ptes(vma->vm_mm, addr, vmf->pte, entry, nr);
 	} else {
 		set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr);

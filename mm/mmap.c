@@ -1287,6 +1287,38 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	if (!mlock_future_ok(mm, vm_flags, len))
 		return -EAGAIN;
 
+	/* allocate smokewagon masks. we need these at shootdown time to know
+	 * which pages are smokewagon-filterable
+	 *
+	 * TODO: allocate masks at fault-in time instead, requires adding a new
+	 * way to identify smokewagon pages at shootdown time, probably by
+	 * augmenting mmu_gather
+	 */
+	if (flags & MAP_SMOKEWAGON) {
+		if (allocate_smokewagon_xa(mm)) return -ENOMEM;
+
+		struct xarray* smokewagon_xa = mm->context.smokewagon_xa;
+
+		for (unsigned long smoke_addr = addr; smoke_addr != addr + len; smoke_addr += PAGE_SIZE) {
+			// FIXME there's a bunch of cases with overwriting mmaps and stuff i haven't thought about too hard yet here
+			// allocate a cpumask for each page and add it to the xarray
+			cpumask_t* new_mask = kmalloc(cpumask_size(), GFP_KERNEL);
+			if (!new_mask) {
+				printk(KERN_ALERT "smokewagon: do_mmap(): mask allocation failed. cpu: %2d, smoke_addr: 0x%lx\n", smp_processor_id(), smoke_addr);
+				return -ENOMEM;
+			}
+			cpumask_clear(new_mask);
+			cpumask_t* ret_mask = xa_cmpxchg(smokewagon_xa, addr, NULL, new_mask, GFP_KERNEL);
+			if (xa_err(ret_mask)) {
+				printk(KERN_ALERT "smokewagon: do_mmap(): xa_cmpxchg failed. xa_err: %d, cpu: %2d, smoke_addr: 0x%lx\n", xa_err(ret_mask), smp_processor_id(), smoke_addr);
+				kfree(new_mask);
+			} else if (ret_mask != NULL) {
+				printk(KERN_ALERT "smokewagon: do_mmap(): ret_mask wasn't NULL. cpu: %2d, smoke_addr: 0x%lx\n", smp_processor_id(), smoke_addr);
+				kfree(new_mask);
+			}
+		}
+	}
+
 	if (file) {
 		struct inode *inode = file_inode(file);
 		unsigned long flags_mask;

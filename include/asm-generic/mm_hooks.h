@@ -15,11 +15,27 @@ static inline int arch_dup_mmap(struct mm_struct *oldmm,
 
 static inline void arch_exit_mmap(struct mm_struct *mm)
 {
-	if (mm->context.smokewagon_masks) {
-		cpumask_t * old = mm->context.smokewagon_masks;
-		mm->context.smokewagon_masks = NULL;
-		kvfree(old);
-		// printk(KERN_ALERT "smokewagon: freed smokewagon masks\n");
+	// unpublish smokewagon_xa for teardown (otherwise tlb flushes from kfree() jump in and it's hairy)
+	// would be nicer to do the teardown under smokewagon, FIXME
+	struct xarray *xa = xchg(&mm->context.smokewagon_xa, NULL);
+	if (xa) {
+		printk(KERN_ALERT "smokewagon: arch_exit_mmap()\n");
+		unsigned long index;
+		cpumask_t * mask;
+		xa_for_each(xa, index, mask) {
+			printk(KERN_ALERT "smokewagon: arch_exit_mmap(): xa_for_each(): index: 0x%lx, mask_ptr: 0x%p\n", index, mask);
+			if (xa_err(mask)) {
+				printk("smokewagon: arch_exit_mmap(): xa_err(mask_ptr): %d\n", xa_err(mask));
+			} else if (mask) {
+				printk("smokewagon: arch_exit_mmap(): freeing mask_ptr: %p\n", mask);
+				kfree(mask);
+			} else {
+				printk("smokewagon: arch_exit_mmap(): NULL mask_ptr: %p\n", mask);
+			}
+		}
+		printk(KERN_ALERT "smokewagon: arch_exit_mmap() before xa_destroy()\n");
+		xa_destroy(xa);
+		kfree(xa);
 	}
 }
 

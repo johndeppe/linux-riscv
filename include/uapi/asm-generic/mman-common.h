@@ -29,7 +29,7 @@
 #define MAP_HUGETLB		0x040000	/* create a huge page mapping */
 #define MAP_SYNC		0x080000 /* perform synchronous page faults for the mapping */
 #define MAP_FIXED_NOREPLACE	0x100000	/* MAP_FIXED which doesn't unmap underlying mapping */
-#define MAP_PRIVATE_TLB	0x200000	/* apply MADV_PRIVATE_TLB */
+#define MAP_SMOKEWAGON	0x200000	/* apply MADV_SMOKEWAGON */
 
 #define MAP_UNINITIALIZED 0x4000000	/* For anonymous mmap, memory could be
 					 * uninitialized */
@@ -80,7 +80,7 @@
 
 #define MADV_COLLAPSE	25		/* Synchronous hugepage collapse */
 
-#define MADV_PRIVATE_TLB	26	/* likely hart-private, try to reduce shootdowns */
+#define MADV_SMOKEWAGON	26	/* likely hart-private, try to reduce shootdowns */
 #define MADV_NORMAL_TLB	27	/* un-set hart-private property */
 #define MADV_PROBE_TLB	28	/* probe TLB for first page in area */
 

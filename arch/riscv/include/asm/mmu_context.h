@@ -29,7 +29,6 @@ static inline int init_new_context(struct task_struct *tsk,
 {
 #ifdef CONFIG_MMU
 	atomic_long_set(&mm->context.id, 0);
-	spin_lock_init(&mm->context.smokewagon_lock);
 #endif
 	return 0;
 }
