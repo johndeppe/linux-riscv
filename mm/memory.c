@@ -826,6 +826,21 @@ copy_nonpresent_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 				pte = pte_swp_mkuffd_wp(pte);
 			set_pte_at(src_mm, addr, src_pte, pte);
 		}
+	} else if (is_smokewagon_entry(entry)) {
+		page = pfn_swap_entry_to_page(entry);
+		folio = page_folio(page);
+		/*
+		 * A smokewagon page is actually resident, the pfn swap entry
+		 * just gives us page faults with which we can track which
+		 * TLBs contain the translation. So, we'll track rss and rmap
+		 * similar to the device private entries below.
+		 */
+		folio_get(folio);
+		rss[mm_counter(folio)]++;
+		printk(KERN_ALERT "smokewagon: copy_nonpresent_pte() entry: %lu\n", entry);
+		/* TODO: think harder about Smokewagon pinning etc. */
+		folio_try_dup_anon_rmap_pte(folio, page, src_vma);
+		/* don't need to set PTE, it's done in this function below */
 	} else if (is_device_private_entry(entry)) {
 		page = pfn_swap_entry_to_page(entry);
 		folio = page_folio(page);

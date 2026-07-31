@@ -10,7 +10,43 @@
 static inline int arch_dup_mmap(struct mm_struct *oldmm,
 				struct mm_struct *mm)
 {
+	if (smp_load_acquire(&oldmm->context.smokewagon_xa)) {
+		printk(KERN_ALERT "smokewagon: arch_dup_mmap(), cpu: %2d, oldmm: %p, mm: %p\n", smp_processor_id(), oldmm, mm);
+
+		mm->context.smokewagon_xa = kmalloc(sizeof(struct xarray), GFP_KERNEL);
+		if (mm->context.smokewagon_xa == NULL)
+			return -ENOMEM;
+		xa_init(mm->context.smokewagon_xa);
+
+		struct vm_area_struct *vma;
+		VMA_ITERATOR(vmi, mm, 0);
+		for_each_vma(vmi, vma) {
+			if (vma->vm_flags & VM_SMOKEWAGON) {
+				for (unsigned long addr = vma->vm_start; addr < vma->vm_end; addr += PAGE_SIZE) {
+					printk(KERN_ALERT "smokewagon: arch_dup_mmap(), cpu: %2d, oldmm: %p, mm: %p, addr: 0x%lx\n", smp_processor_id(), oldmm, mm, addr);
+					cpumask_t* mask = kmalloc(cpumask_size(), GFP_KERNEL);
+					if (!mask)
+						goto cleanup;
+					if (xa_is_err(xa_store(mm->context.smokewagon_xa, addr, mask, GFP_KERNEL))) {
+						kfree(mask);
+						goto cleanup;
+					}
+					cpumask_clear(mask);
+				}
+			}
+		}
+	}
 	return 0;
+cleanup:
+	printk(KERN_ALERT "smokewagon: arch_dup_mmap() CLEANUP, cpu: %2d, oldmm: %p, mm: %p\n", smp_processor_id(), oldmm, mm);
+	unsigned long index;
+	cpumask_t* mask;
+	xa_for_each(mm->context.smokewagon_xa, index, mask) {
+		kfree(mask);
+	}
+	xa_destroy(mm->context.smokewagon_xa);
+	kfree(mm->context.smokewagon_xa);
+	return -ENOMEM;
 }
 
 static inline void arch_exit_mmap(struct mm_struct *mm)
