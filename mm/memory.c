@@ -837,7 +837,7 @@ copy_nonpresent_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		 */
 		folio_get(folio);
 		rss[mm_counter(folio)]++;
-		printk(KERN_ALERT "smokewagon: copy_nonpresent_pte() entry: %lu\n", entry);
+		printk(KERN_ALERT "smokewagon: copy_nonpresent_pte() entry: %lu\n", entry.val);
 		/* TODO: think harder about Smokewagon pinning etc. */
 		folio_try_dup_anon_rmap_pte(folio, page, src_vma);
 		/* don't need to set PTE, it's done in this function below */
@@ -1620,6 +1620,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 		if (vma && vma->vm_flags & VM_SMOKEWAGON && is_smokewagon_entry(pte_to_swp_entry(ptent))) {
 			ptent = pfn_pte(swp_offset_pfn(pte_to_swp_entry(ptent)), vm_get_page_prot(vma->vm_flags));
 			set_pte_at(mm, addr, pte, ptent);
+			// TODO: add smokewagon mask tracking to mmu_gather, then we can deallocate masks here without forgetting
 		}
 
 		if (pte_present(ptent)) {
