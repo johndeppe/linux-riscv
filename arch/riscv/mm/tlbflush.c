@@ -159,7 +159,7 @@ void flush_tlb_mm(struct mm_struct *mm)
 		cpumask_t * mask;
 		rcu_read_lock();
 		xa_for_each(mm->context.smokewagon_xa, addr, mask) {
-			printk(KERN_ALERT "smokewagon: flush_tlb_mm() cpu: %2d, asid: 0x%lx, addr: 0x%lx\n", smp_processor_id(), get_mm_asid(mm), addr);
+			//printk(KERN_ALERT "smokewagon: flush_tlb_mm() cpu: %2d, asid: 0x%lx, addr: 0x%lx\n", smp_processor_id(), get_mm_asid(mm), addr);
 			cpumask_clear(mask);
 		}
 		rcu_read_unlock();
@@ -187,7 +187,7 @@ void flush_tlb_mm_range(struct mm_struct *mm,
 				rcu_read_unlock();
 				goto range_flush_out;
 			}
-			/* debug printks */
+			/* debug printks
 			char mask_buf[NR_CPUS+1];   // debug printk buffer
 			char filter_buf[NR_CPUS+1]; // debug printk buffer
 			for (size_t i=0; i<nr_cpu_ids;i++) {mask_buf[i] = cpumask_test_cpu(i,mask) ? '1' : '0';} mask_buf[nr_cpu_ids] = '\0';
@@ -199,7 +199,7 @@ void flush_tlb_mm_range(struct mm_struct *mm,
 				   smp_processor_id(), get_mm_asid(mm), start, end, addr,
 				   addr >> PAGE_SHIFT,
 				   mask_buf,
-				   filter_buf);
+				   filter_buf); */
 			cpumask_or(&smokewagon_filter, &smokewagon_filter, mask);
 			cpumask_clear(mask);
 		}
@@ -447,7 +447,7 @@ inline void smokewagon_load_tlb(struct vm_fault *vmf)
 	if (vmf->vma->vm_flags & VM_WRITE)
 		smel = pte_mkwrite(pte_mkdirty(smel), vmf->vma);
 
-	/* debug printk */
+	/* debug printk
 	printk(KERN_ALERT "smokewagon_load_tlb(): cpu: %2d, pte: 0x%lx, orig_pte: 0x%lx\n"
 					  "                       smeh: 0x%lx, asid: 0x%lx, vpn: 0x%lx, addr: 0x%lx\n"
 					  "                       smel: 0x%lx, pfn: 0x%lx, V: %lx, R: %lx, W: %lx, X: %lx, U: %lx, G: %lx, A: %lx, D: %lx\n"
@@ -457,36 +457,36 @@ inline void smokewagon_load_tlb(struct vm_fault *vmf)
 		smeh, asid, vpn, vmf->address,
 		smel.pte, pfn, smel.pte & _PAGE_PRESENT, smel.pte & _PAGE_READ, smel.pte & _PAGE_WRITE, smel.pte & _PAGE_EXEC, smel.pte & _PAGE_USER, smel.pte & _PAGE_GLOBAL, smel.pte & _PAGE_ACCESSED, smel.pte & _PAGE_DIRTY,
 		vmf->vma->vm_flags, vmf->vma->vm_flags & VM_READ, vmf->vma->vm_flags & VM_WRITE, vmf->vma->vm_flags & VM_EXEC, vmf->vma->vm_flags & VM_SHARED,
-		vmf->vma->vm_flags & VM_SMOKEWAGON,vmf->vma->vm_flags & VM_MAYREAD, vmf->vma->vm_flags & VM_MAYWRITE, vmf->vma->vm_flags & VM_MAYEXEC, vmf->vma->vm_flags & VM_MAYSHARE);
+		vmf->vma->vm_flags & VM_SMOKEWAGON,vmf->vma->vm_flags & VM_MAYREAD, vmf->vma->vm_flags & VM_MAYWRITE, vmf->vma->vm_flags & VM_MAYEXEC, vmf->vma->vm_flags & VM_MAYSHARE); */
 
 	/* construct smcir */
 	unsigned long smcir = asid | SMCIR_TLBWR; // TLBWR overwrites a random entry
 
 	/* find page's smokewagon mask */
 	rcu_read_lock();
-	printk(KERN_ALERT "smokewagon: smokewagon_load_tlb(): smokewagon_xa: %p, addr: 0x%lx", vmf->vma->vm_mm->context.smokewagon_xa, vmf->address & PAGE_MASK);
+	//printk(KERN_ALERT "smokewagon: smokewagon_load_tlb(): smokewagon_xa: %p, addr: 0x%lx", vmf->vma->vm_mm->context.smokewagon_xa, vmf->address & PAGE_MASK);
 	cpumask_t * mask = xa_load(vmf->vma->vm_mm->context.smokewagon_xa, vmf->address & PAGE_MASK);
 
-	/* debug printk */
+	/* debug printk
 	char before_buf[NR_CPUS+1];
 	for (size_t i=0; i<nr_cpu_ids;i++) {before_buf[i] = cpumask_test_cpu(i,mask) ? '1' : '0';}
-	before_buf[nr_cpu_ids] = '\0';
+	before_buf[nr_cpu_ids] = '\0'; */
 
 	/* set cpu's bit in page's smokewagon mask */
 	cpumask_set_cpu(smp_processor_id(), mask);
 
-	/* debug printk */
+	/* debug printk
 	char after_buf[NR_CPUS+1];
 	for (size_t i=0; i<nr_cpu_ids;i++) {after_buf[i] = cpumask_test_cpu(i,mask) ? '1' : '0';}
-	after_buf[nr_cpu_ids] = '\0';
+	after_buf[nr_cpu_ids] = '\0'; */
 
 	rcu_read_unlock();
 
-	/* debug printk */
+	/* debug printk
 	printk("smokewagon: smokewagon_load_tlb(): before: %s, cpu: %2d\n"
 		   "                                    after: %s, addr: 0x%lx\n",
 		    before_buf, smp_processor_id(),
-			after_buf, vmf->address);
+			after_buf, vmf->address); */
 
 	csr_write(CSR_SMEH, smeh);
 	csr_write(CSR_SMEL, smel.pte);

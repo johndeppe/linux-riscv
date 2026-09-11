@@ -55,7 +55,7 @@ static inline void arch_exit_mmap(struct mm_struct *mm)
 	// would be nicer to do the teardown under smokewagon, FIXME
 	struct xarray *xa = xchg(&mm->context.smokewagon_xa, NULL);
 	if (xa) {
-		printk(KERN_ALERT "smokewagon: arch_exit_mmap()\n");
+		//printk(KERN_ALERT "smokewagon: arch_exit_mmap()\n");
 		unsigned long index;
 		cpumask_t * mask;
 		xa_for_each(xa, index, mask) {
@@ -69,7 +69,7 @@ static inline void arch_exit_mmap(struct mm_struct *mm)
 				printk("smokewagon: arch_exit_mmap(): NULL mask_ptr: %p\n", mask);
 			}
 		}
-		printk(KERN_ALERT "smokewagon: arch_exit_mmap() before xa_destroy()\n");
+		//printk(KERN_ALERT "smokewagon: arch_exit_mmap() before xa_destroy()\n");
 		xa_destroy(xa);
 		kfree(xa);
 	}

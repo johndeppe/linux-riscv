@@ -837,7 +837,7 @@ copy_nonpresent_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		 */
 		folio_get(folio);
 		rss[mm_counter(folio)]++;
-		printk(KERN_ALERT "smokewagon: copy_nonpresent_pte() entry: %lu\n", entry);
+		printk(KERN_ALERT "smokewagon: copy_nonpresent_pte() entry: %lu\n", entry.val);
 		/* TODO: think harder about Smokewagon pinning etc. */
 		folio_try_dup_anon_rmap_pte(folio, page, src_vma);
 		/* don't need to set PTE, it's done in this function below */
@@ -1618,6 +1618,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 		 * I'll just quickly put back a regular pte instead of hacking
 		 * everything in folio-zapping land. */
 		if (vma && vma->vm_flags & VM_SMOKEWAGON && is_smokewagon_entry(pte_to_swp_entry(ptent))) {
+			//printk(KERN_ALERT "smokewagon: zap_pte_range(). cpu: %02d\n", smp_processor_id());
 			ptent = pfn_pte(swp_offset_pfn(pte_to_swp_entry(ptent)), vm_get_page_prot(vma->vm_flags));
 			set_pte_at(mm, addr, pte, ptent);
 		}
@@ -4565,7 +4566,7 @@ static vm_fault_t __do_fault(struct vm_fault *vmf)
 	struct folio *folio;
 	vm_fault_t ret;
 
-	if (vmf->vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: __do_fault()\n");
+	//if (vmf->vma->vm_flags & VM_SMOKEWAGON) printk(KERN_ALERT "smokewagon: __do_fault()\n");
 
 	/*
 	 * Preallocate pte before we take page_lock because this might lead to
@@ -4708,13 +4709,13 @@ inline int allocate_smokewagon_mask_if_none(struct mm_struct *mm, unsigned long 
 
 	cpumask_t* mask = xa_load(smokewagon_xa, addr);
 	if (!mask) {
-		cpumask_t* mask = kmalloc(cpumask_size(), GFP_KERNEL);
+		cpumask_t* mask = kmalloc(cpumask_size(), GFP_ATOMIC);
 		if (!mask) {
 			printk(KERN_ALERT "smokewagon: allocate_smokewagon_mask_if_none(): allocation failed. cpu: %2d, mm: 0x%p, addr: 0x%lx\n", smp_processor_id(), mm, addr);
 			return -ENOMEM;
 		}
 		cpumask_clear(mask);
-		cpumask_t* ret_mask = xa_cmpxchg(smokewagon_xa, addr, NULL, mask, GFP_KERNEL);
+		cpumask_t* ret_mask = xa_cmpxchg(smokewagon_xa, addr, NULL, mask, GFP_ATOMIC);
 		if (xa_err(ret_mask)) {
 			printk(KERN_ALERT "smokewagon: allocate_smokewagon_mask_if_none(): xa_cmpxchg failed. xa_err: %d, cpu: %2d, mm: 0x%p, addr: 0x%lx\n", xa_err(ret_mask), smp_processor_id(), mm, addr);
 			kfree(mask);

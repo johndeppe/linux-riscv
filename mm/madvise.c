@@ -1189,10 +1189,10 @@ static long madvise_remove(struct vm_area_struct *vma,
 int allocate_smokewagon_xa(struct mm_struct *mm) {
 	if (!smp_load_acquire(&mm->context.smokewagon_xa)) {
 		// still no masks, time to allocate and publish
-		printk(KERN_ALERT "smokewagon: allocate_smokewagon_xa: cpu: %2d inside guard\n", smp_processor_id());
+		//printk(KERN_ALERT "smokewagon: allocate_smokewagon_xa: cpu: %2d inside guard\n", smp_processor_id());
 		struct xarray *xa = kmalloc(sizeof(struct xarray), GFP_KERNEL);
 		if (!xa) {
-			printk(KERN_ALERT "smokewagon: allocate_smokewagon_xa: kmalloc failed. cpu: %2d\n", smp_processor_id());
+			//printk(KERN_ALERT "smokewagon: allocate_smokewagon_xa: kmalloc failed. cpu: %2d\n", smp_processor_id());
 			return -ENOMEM;
 		}
 
@@ -1203,10 +1203,10 @@ int allocate_smokewagon_xa(struct mm_struct *mm) {
 		if (old) {
 			// old wasn't NULL: somebody else got there ahead of us
 			kfree(xa);
-			printk(KERN_ALERT "smokewagon: allocate_smokewagon_xa: cpu: %2d lost smokewagon_xa publishing race\n", smp_processor_id());
+			//printk(KERN_ALERT "smokewagon: allocate_smokewagon_xa: cpu: %2d lost smokewagon_xa publishing race\n", smp_processor_id());
 		} else {
 			// old was NULL: pointer sucessfully published
-			printk(KERN_ALERT "smokewagon: allocate_smokewagon_xa: cpu: %2d published smokewagon_xa\n", smp_processor_id());
+			//printk(KERN_ALERT "smokewagon: allocate_smokewagon_xa: cpu: %2d published smokewagon_xa\n", smp_processor_id());
 		}
 	}
 	return 0;

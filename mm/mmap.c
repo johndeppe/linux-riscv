@@ -2345,6 +2345,18 @@ static void unmap_region(struct mm_struct *mm, struct ma_state *mas,
 				 next ? next->vm_start : USER_PGTABLES_CEILING,
 				 mm_wr_locked);
 	tlb_finish_mmu(&tlb);
+	if (mm->context.smokewagon_xa) {
+		//printk(KERN_ALERT "smokewagon: unmap_region() cpu: %02d, mt_start: 0x%lx, mas->index: 0x%lx, tree_end: 0x%lx, VM_SMOKEWAGON: %lx\n", smp_processor_id(), mt_start, mas->index, tree_end, vma->vm_flags & VM_SMOKEWAGON);
+		struct vm_area_struct* my_vma;
+		unsigned long my_addr;
+		cpumask_t* mask;
+
+		xa_for_each_range(mm->context.smokewagon_xa, my_addr, mask, start, end - PAGE_SIZE) {
+			xa_erase(mm->context.smokewagon_xa, my_addr);
+			kfree(mask);
+			//printk(KERN_ALERT "smokewagon: unmap_region()'s kfree cpu: %02d, vma: %p, my_addr: 0x%lx, mask %p\n", smp_processor_id(), my_addr, mask);
+		}
+	}
 }
 
 /*
